@@ -1,0 +1,9 @@
+## Interface: 120001, 120005
+## Title: Roth Blizzard Plates
+## Notes: Roth-style skin for default Blizzard nameplates (Midnight).
+## Author: Iurii
+## Version: 0.1.14
+## SavedVariables: RothBlizzPlatesDB
+
+core.lua
+castbar.lua
