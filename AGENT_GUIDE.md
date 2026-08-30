@@ -2,36 +2,136 @@
 
 ## Start here
 
-The complete load contract is [`RothBlizzPlates.toc`](RothBlizzPlates.toc): `core.lua` is loaded before `castbar.lua`; there is no XML and no bundled library. `core.lua` creates/normalizes `RothBlizzPlatesDB`, then owns nameplate discovery, layout, font/media, settings, and lifecycle hooks. `castbar.lua` is a second layer over Blizzard cast widgets and installs its own debug slash command.
+[`RothBlizzPlates.toc`](RothBlizzPlates.toc) is the definitive load contract. Retail 12.1 loads `core.lua` first and `castbar_12_1.lua` second. There is no XML, bundled library, raw unit-data subsystem, or replacement nameplate framework.
 
-## Runtime and state flow
+Target contract:
 
-`core.lua` handles `PLAYER_LOGIN`, `NAME_PLATE_UNIT_ADDED`, `CVAR_UPDATE`, `UI_SCALE_CHANGED`, and `PLAYER_REGEN_ENABLED`. Login registers Settings and calls `RestyleAllVisible`; a newly added plate goes through `StyleNamePlateUnit` -> `ApplySkin` -> `ApplyLayout`. `ApplySkin` only marks/stylizes the existing Blizzard unit frame and records blocked layouts in `PendingLayout`; regen-enabled retries those layouts.
+- Retail / Midnight `12.1.0`;
+- Interface `120100`;
+- verified Blizzard source baseline `12.1.0.69497`;
+- no external addon dependencies.
 
-`InstallNamePlateLifecycleHooks` post-hooks `NamePlateUnitFrameMixin:UpdateAnchors`, `ApplyFrameOptions`, and `NamePlateBaseMixin:ApplyFrameOptions` when available, with `EventUtil.ContinueOnAddOnLoaded("Blizzard_NamePlates", ...)` as the late-load path. `CompactUnitFrame_UpdateSelectionHighlight` is also post-hooked to re-disable target highlight.
+## Runtime map
 
-`castbar.lua` finds the cast container with `FindCastContainer`, chooses the visible primary StatusBar, creates a Roth fill/border overlay, mirrors min/max/value/color via post-hooks, and applies `ApplyCastBar`. It hooks possible Blizzard update functions (`CompactUnitFrame_UpdateCastBar`, `DefaultCompactNamePlateFrame_UpdateCastBar`, `CompactNamePlateFrame_UpdateCastBar`, `NamePlate_UpdateCastBar`) and relevant `CastingBarMixin` methods. `HookScript("OnShow")` is used only on the discovered cast container to reapply after template rebuilds.
+### `core.lua`
 
-## State, surfaces, dependencies
+`core.lua` creates and sanitizes `RothBlizzPlatesDB`, defines value/object accessibility helpers, and owns the nameplate presentation boundary.
 
-`RothBlizzPlatesDB` contains `enabled`, `plate`, `healthBar`, `castBar`, `castBorder`, `layout`, `name`, `font`, and the cast debug flag. Settings in `core.lua` expose `font.useGlobal` and `castBar.enabled`; `/rbpcast debug` toggles `debugCast`, and `/rbpcast dump` dumps target castbar regions. There are no declared external dependencies; Blizzard nameplate/castbar mixins are runtime boundaries, not addon dependencies.
+Event flow:
 
-## Invariants and risks
+```text
+PLAYER_LOGIN
+  -> InitializeSettings
+  -> RestyleAllVisible
 
-- This addon skins existing Blizzard frames and must not replace their lifecycle or read UnitHealth/UnitName/UnitGUID as logic inputs.
-- `CanTouchAnchors`, `IsPlainNumber`, `IsPlainBoolean`, and `pcall` guards protect against forbidden/secret values. Do not introduce arithmetic on secret anchors or unit data.
-- Anchor/size operations can be blocked in combat; preserve `PendingLayout` and the regen retry.
-- Blizzard template recreation can invalidate child regions; change `ApplyCastBar` and its hooks together.
-- `CVAR_UPDATE` and scale/nameplate lifecycle hooks can restyle many visible plates; keep work idempotent and avoid new per-frame loops.
+NAME_PLATE_UNIT_ADDED
+  -> StyleNamePlateUnit
+  -> ApplySkin
+  -> ApplyLayout
+
+CVAR_UPDATE / UI_SCALE_CHANGED
+  -> RestyleAllVisible outside combat
+
+PLAYER_REGEN_ENABLED
+  -> FlushPendingFrames
+  -> RestyleAllVisible
+```
+
+`ApplySkin` immediately queues the frame when `InCombatLockdown()` is true. Out of combat, it styles the existing health StatusBar, creates one addon-owned plate texture on that bar, applies accessible fonts, keeps target highlight disabled, applies the threat texture, and delegates castbar presentation through `_G.RothBlizzPlates_CastBar.Apply`.
+
+Lifecycle post-hooks on accessible Blizzard mixins only request `ApplySkin`; they do not perform an alternate state update path. The pending table is weak-keyed.
+
+### `castbar_12_1.lua`
+
+The castbar owner resolves known fields on the Blizzard unit frame and cast container. It does not call `GetChildren`, `GetNumChildren`, or scan arbitrary frame trees.
+
+Presentation flow:
+
+```text
+Blizzard castbar update hook
+  -> RequestApply
+  -> combat? queue : Apply
+  -> known container / StatusBar / icon fields
+  -> snapshot accessible Blizzard texture and geometry
+  -> apply Roth fill + addon-owned border + icon geometry
+```
+
+Explicit accessible `notInterruptible`, `interruptible`, or `isInterruptible` values are preferred. Accessible status-bar color is a fallback. Unknown state fails closed to non-interruptible art.
+
+When `castBar.enabled` becomes false, the module restores the captured Blizzard status-bar texture and accessible geometry, hides the addon-owned border, and defers restoration if combat is active.
+
+`/rbpcast status` reports only the pending queue count. It does not dump unit, spell, child-tree, or restricted values.
+
+## State and dependencies
+
+Durable state is `RothBlizzPlatesDB`:
+
+- `enabled`;
+- `plate`;
+- `healthBar`;
+- `castBar`;
+- `castBorder`;
+- `layout`;
+- `name`;
+- `font`.
+
+Runtime-only state includes weak pending tables, frame ownership markers, scale caches, original geometry snapshots, the original cast texture, and the addon-owned border texture.
+
+Blizzard nameplate/castbar mixins and global update functions are optional runtime boundaries. Every hook is presence-guarded. Absence is not replaced by polling or a frame-tree scan.
+
+## Invariants
+
+- Blizzard owns nameplate and cast lifecycle, progress, visibility, threat, target state, and secure behavior.
+- Do not add `UnitName`, `UnitGUID`, `UnitHealth`, aura, combat-log, or spell-state derivation to this addon.
+- Gate secret-capable values before type checks, comparisons, arithmetic, indexing, formatting, concatenation, logging, or persistence.
+- Check `CanBeAccessedInContext` and `IsForbidden` before using frame objects when available.
+- Do not create textures/frames or call geometry/font mutators while in combat.
+- Keep pending tables weak-keyed and retry only on `PLAYER_REGEN_ENABLED`.
+- Do not add `HookScript` or hook `CastingBarMixin:OnEvent` as a broad state source.
+- Do not infer interruptibility from inaccessible visibility, alpha, error, focus, layout, or timing side channels.
+- Do not mutate Blizzard shield/background regions merely to preserve a state signal; render addon-owned art instead.
+- Keep repeated presentation passes idempotent.
 
 ## Change routing
 
-- Plate geometry/font/health texture: `core.lua` (`ApplyLayout`, `ApplyFont`, `ApplySkin`).
-- Nameplate lifecycle/target highlight: `core.lua` (`RestyleAllVisible`, `InstallNamePlateLifecycleHooks`, event frame).
-- Castbar discovery, overlays, colors, and update hooks: `castbar.lua` (`FindCastContainer`, `ApplyCastBar`, `InstallCastbarHooks`).
-- Settings/default migration: `core.lua` DB initialization and `InitializeSettings`; preserve old-layout migration predicates.
-- Debug output: `castbar.lua` (`DebugPrint`, `DumpCastForUnit`) and `/rbpcast` handler.
+- DB defaults, sanitization, Settings: `core.lua`.
+- Value/object access gates: both runtime files; keep semantics aligned.
+- Health-bar/plate/font/threat presentation: `core.lua`.
+- Nameplate lifecycle and nameplate pending queue: `core.lua`.
+- Cast container/status bar/icon discovery: `castbar_12_1.lua`.
+- Interruptibility presentation, cast restore, cast hooks, cast pending queue: `castbar_12_1.lua`.
+- Offline combat regression: `tests/test_combat_deferral.lua`.
+- Metadata/load order: `RothBlizzPlates.toc`.
 
 ## Verification
 
-Static: validate TOC references, parse both Lua files, and run `git diff --check`. In game, enable/disable the addon, enter/leave combat with visible nameplates, change UI scale/nameplate CVars, toggle both Settings controls, and run `/rbpcast debug` then `/rbpcast dump` on a target. Verify no forbidden/secret Lua errors and that late Blizzard_NamePlates loading still installs hooks. Current audit does not claim a live client run or current patch mixin availability.
+From the repository root:
+
+```sh
+texlua --luaconly core.lua
+texlua --luaconly castbar_12_1.lua
+texlua tests/test_combat_deferral.lua
+```
+
+Expected regression output:
+
+```text
+PASS: core and castbar defer geometry in combat and restore Blizzard presentation
+```
+
+Also inspect the source for forbidden regressions:
+
+```text
+GetChildren
+GetNumChildren
+HookScript
+UnitName
+UnitGUID
+UnitHealth
+C_UnitAuras
+AuraUtil.ForEachAura
+```
+
+In the target client, test fresh login and `/reload`; target changes; normal, elite, boss and threat states; casts, channels, interrupted casts, interruptible/non-interruptible transitions; combat entry/exit with visible plates; UI-scale/nameplate CVar changes; castbar option disable/enable; `koKR`/`zhCN`/`zhTW` font fallback; and `/console taintLog 1` plus Lua error capture.
+
+Static tests do not prove current-client mixin availability or real secret/forbidden behavior. Record the exact build and scenario for every live result.
