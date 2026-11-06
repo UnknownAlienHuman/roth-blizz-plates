@@ -1,22 +1,32 @@
-# Roth Blizzard Plates code graph
+# Code graph
 
-```mermaid
-flowchart LR
-  T["RothBlizzPlates.toc"] --> C["core.lua"]
-  T --> B["castbar_12_1.lua"]
-  C --> DB[("RothBlizzPlatesDB")]
-  C --> N["Blizzard nameplate widgets"]
-  B --> N
-  C --> QN["weak nameplate pending queue"]
-  B --> QB["weak castbar pending queue"]
-  R["PLAYER_REGEN_ENABLED"] --> QN
-  R --> QB
-  QN --> N
-  QB --> N
-  C --> M["media textures and font"]
-  B --> M
-  X["tests/test_combat_deferral.lua"] --> C
-  X --> B
+```text
+NAME_PLATE_UNIT_ADDED(unit)
+  -> C_NamePlate.GetNamePlateForUnit(unit)
+  -> ActivateFrame(unitFrame)
+  -> RequestApply(unitFrame)
+  -> ApplyFrame(unitFrame, generation)
+     -> ConfigurePlate(owned texture)
+     -> ApplyFonts()
+     -> CastBar.Apply(unitFrame)
+        -> CastBarsContainer.castBar
+        -> EnsureState(two owned textures)
+        -> conservative initial border
+
+CastingBarMixin:GetEffectiveType(..., notInterruptible, ...)
+  -> UpdateFromNotInterruptible()
+  -> SetAlphaFromBoolean()
+
+NAME_PLATE_UNIT_REMOVED(unit) / OnUnitCleared(unitFrame)
+  -> ReleaseFrame(unitFrame)
+     -> generation++
+     -> drop pending work
+     -> hide owned plate
+     -> CastBar.Release(unitFrame)
+
+combat acquisition / layout callback
+  -> PendingByFrame[unitFrame] = generation
+PLAYER_REGEN_ENABLED
+  -> one bounded flush
+  -> stale generations discarded
 ```
-
-Blizzard owns unit/cast state and lifecycle. The addon owns only additive presentation and out-of-combat retry state.

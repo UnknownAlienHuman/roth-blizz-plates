@@ -1,42 +1,51 @@
-# Roth Blizzard Plates architecture
+# Architecture
 
-## Ownership
+## Ownership boundary
 
-`core.lua` owns SavedVariables defaults, value/object accessibility gates, Blizzard nameplate discovery, addon-owned plate art, font policy, Settings registration, lifecycle hooks, and the weak-key queue for deferred nameplate presentation.
+Blizzard owns nameplate creation, unit assignment, protected geometry, health/cast progress, cast icon/text, visibility, targeting, threat, and state derivation. RothBlizzPlates owns only its decorative textures and font choices.
 
-`castbar_12_1.lua` owns the additive castbar presentation layer. It resolves only known Blizzard castbar fields, swaps the existing StatusBar texture, creates one addon-owned border texture, positions the existing spell icon, snapshots/restores accessible Blizzard geometry, and maintains a separate weak-key combat-deferral queue.
+The addon never reads unit health, names, GUIDs, auras, combat-log payloads, or cast payloads to derive presentation state.
 
-Blizzard remains the authority for nameplate creation, unit state, cast/channel state, cast progress, target/threat state, visibility, and secure behavior.
+## Source contract
 
-## Load order
+Target: Retail `12.1.5`, interface `120105`.
 
-```text
-RothBlizzPlates.toc
-  -> core.lua
-  -> castbar_12_1.lua
-```
+Selected source: Blizzard UI build `12.1.5.70688`, commit `d07eb00237d8891f153215db98a5df880a26cfe5`.
 
-The core may run before the castbar module exists; its next lifecycle pass calls the exported castbar owner after the second file loads.
+Canonical paths used:
 
-## Safety boundary
+- health bar: `unitFrame.HealthBarsContainer.healthBar`
+- cast bar: `unitFrame.CastBarsContainer.castBar`
+- frame-option lifecycle: `NamePlateUnitFrameMixin:ApplyFrameOptions`
+- recycle lifecycle: `NamePlateUnitFrameMixin:OnUnitCleared`
+- cast start: `CastingBarMixin:GetEffectiveType(..., notInterruptible, ...)`
 
-- No `UnitName`, `UnitGUID`, `UnitHealth`, aura, or combat-log state is used as a presentation input.
-- Secret-capable values are checked with `canaccessvalue` or `issecretvalue` before type checks, comparisons, arithmetic, concatenation, formatting, logging, or persistence.
-- Frame objects are checked through `CanBeAccessedInContext` and `IsForbidden` when those methods exist.
-- No addon-owned region is created in combat.
-- No `ClearAllPoints`, `SetPoint`, `SetAllPoints`, `SetSize`, or `SetFont` operation runs while `InCombatLockdown()` is true.
-- Nameplate and castbar lifecycle hooks request an idempotent presentation pass; they do not mutate Blizzard state directly in combat.
-- Castbar discovery does not call `GetChildren` or `GetNumChildren` and does not infer state from child-tree shape.
-- Unknown interruptibility fails closed to non-interruptible art.
+## Lifecycle
 
-## State
+`NAME_PLATE_UNIT_ADDED` resolves exactly one plate. `NAME_PLATE_UNIT_REMOVED` and `OnUnitCleared` invalidate its generation, clear assignment state, hide owned regions, and discard deferred work.
 
-Durable state is limited to `RothBlizzPlatesDB`. Frame references, original geometry snapshots, original status-bar textures, ownership markers, scale caches, and pending queues are runtime-only. Pending tables use weak keys so pooled or released Blizzard frames are not retained by the addon.
+Combat deferral is weak-keyed by unit frame and tagged with the current generation. `PLAYER_REGEN_ENABLED` performs one bounded flush. Inaccessible or missing objects are skipped; they are not placed in retry loops.
 
-## Restore behavior
+A visible-nameplate scan exists only for initial/explicit refresh and is coalesced.
 
-Disabling castbar styling restores the captured Blizzard status-bar texture and accessible geometry for the cast container, nested StatusBar, and spell icon. The addon-owned border is hidden. The addon does not attempt an unsafe restore during combat; it defers the operation.
+## Secret interruptibility
 
-## Evidence boundary
+The cast module maintains two addon-owned border textures. Potentially secret booleans are sent directly to `Region:SetAlphaFromBoolean`:
 
-`texlua` syntax checks and `tests/test_combat_deferral.lua` prove the offline deferral/restore contract against mocks. They do not prove current-client mixin availability, visual alignment, taint behavior, or inaccessible-value behavior in a real restricted encounter. Those remain live-client gates.
+- Blizzard's `GetEffectiveType` receives `notInterruptible` for cast starts and later transitions.
+- The secure post-hook forwards an inaccessible value unchanged.
+- The documented accessible `nil` case fails closed to the blocked presentation before entering the sink.
+
+No Lua branch, comparison, negation, format operation, log call, or color inference touches a secret value.
+
+## Deliberate non-features
+
+The addon does not:
+
+- resize or reanchor Blizzard health/cast bars;
+- move the native cast icon or text;
+- suppress target or threat highlights;
+- traverse frame children;
+- infer interruptibility from colors or textures;
+- hook guessed global function names;
+- use `pcall` as a permissions mechanism.
