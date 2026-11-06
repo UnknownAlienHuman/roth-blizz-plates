@@ -78,6 +78,9 @@ CastingBarMixin = {
 -- owner table before third-party addons normally install their hooks.
 NamePlateCastingBarMixin = {
   GetEffectiveType = CastingBarMixin.GetEffectiveType,
+  IsInterruptable = function()
+    return SECRET
+  end,
 }
 
 local baseMethodBeforeLoad = CastingBarMixin.GetEffectiveType
@@ -116,5 +119,24 @@ assertEqual(castBar.textures[2].alphaSignal, SECRET, "blocked layer receives sec
 CastingBarMixin.GetEffectiveType(castBar, false, false, false, false)
 assertEqual(castBar.textures[1].alphaSignal, SECRET, "generic castbar calls must not affect nameplates")
 assertEqual(castBar.textures[2].alphaSignal, SECRET, "generic owner stays isolated")
+
+
+-- Late attachment or combat deferral can miss the hook signal. The apply path
+-- reads Blizzard's current possibly-secret interruptible boolean and sends it
+-- directly to complementary native sinks.
+local currentCastBar = NewRegion()
+setmetatable(currentCastBar, { __index = NamePlateCastingBarMixin })
+local currentContainer = NewRegion()
+currentContainer.castBar = currentCastBar
+local currentUnitFrame = NewRegion()
+currentUnitFrame.CastBarsContainer = currentContainer
+assertEqual(RothBlizzPlates_CastBar.Prepare(currentUnitFrame), true, "current-state preparation")
+assertEqual(RothBlizzPlates_CastBar.Apply(currentUnitFrame), true, "current-state apply")
+assertEqual(currentCastBar.textures[1].alphaSignal, SECRET, "native interruptible signal reaches interruptible layer")
+assertEqual(currentCastBar.textures[1].alphaIfTrue, 255, "interruptible layer shown when native boolean is true")
+assertEqual(currentCastBar.textures[1].alphaIfFalse, 0, "interruptible layer hidden when native boolean is false")
+assertEqual(currentCastBar.textures[2].alphaSignal, SECRET, "native interruptible signal reaches blocked layer")
+assertEqual(currentCastBar.textures[2].alphaIfTrue, 0, "blocked layer hidden when native boolean is true")
+assertEqual(currentCastBar.textures[2].alphaIfFalse, 255, "blocked layer shown when native boolean is false")
 
 print("test_castbar_hook_owner.lua: ok")
