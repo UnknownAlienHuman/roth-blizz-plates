@@ -3,14 +3,14 @@ RothBlizzPlates
 Retail 12.1.5 presentation layer for Blizzard-owned nameplates.
 
 Blizzard owns unit state, protected layout, health/cast progress, threat, target
-state, and lifecycle. This addon only creates its own decorative regions and
+state, and lifecycle. This addon creates only its own decorative regions and
 changes fonts. It never derives gameplay state.
 --]]
 
 local ADDON_NAME = ...
 
 local EXPECTED_INTERFACE = 120105
-local SCHEMA_VERSION = 3
+local SCHEMA_VERSION = 4
 local MEDIA_PATH = ("Interface\\AddOns\\%s\\media\\"):format(ADDON_NAME)
 local MEDIA = {
   FONT = MEDIA_PATH .. "Diablo-Light.ttf",
@@ -39,8 +39,8 @@ local DEFAULTS = {
     enabled = true,
     width = 180,
     height = 60,
-    x = 6,
-    y = 4,
+    offsetX = 0,
+    offsetY = 0.5,
     alpha = 1,
   },
   castBar = {
@@ -97,8 +97,8 @@ local function InitializeDatabase()
 
   local previousSchema = type(db.schemaVersion) == "number" and db.schemaVersion or 0
 
-  -- Version 2 stored cast-border offsets in unit-frame coordinates. Convert
-  -- once to offsets relative to Blizzard's cast bar and keep user tuning.
+  -- Schema 3: cast-border coordinates became offsets relative to the native
+  -- cast bar. Preserve old tuning before deleting the obsolete cast geometry.
   if previousSchema < 3 and type(db.castBorder) == "table" then
     local castBar = type(db.castBar) == "table" and db.castBar or nil
     if type(db.castBorder.offsetX) ~= "number" then
@@ -113,11 +113,34 @@ local function InitializeDatabase()
     end
   end
 
+  -- Schema 4: plate coordinates are offsets relative to the native health bar.
+  -- Earlier builds retained the old unit-frame coordinates after removing the
+  -- health-bar geometry owner, shifting the artwork by the legacy bar offset.
+  if previousSchema < 4 then
+    if type(db.plate) ~= "table" then
+      db.plate = {}
+    end
+    local healthBar = type(db.healthBar) == "table" and db.healthBar or nil
+    local healthX = healthBar and type(healthBar.x) == "number" and healthBar.x or 6
+    local healthY = healthBar and type(healthBar.y) == "number" and healthBar.y or 3.5
+
+    if type(db.plate.offsetX) ~= "number" then
+      local plateX = type(db.plate.x) == "number" and db.plate.x or 6
+      db.plate.offsetX = plateX - healthX
+    end
+    if type(db.plate.offsetY) ~= "number" then
+      local plateY = type(db.plate.y) == "number" and db.plate.y or 4
+      db.plate.offsetY = plateY - healthY
+    end
+  end
+
   MergeDefaults(db, DEFAULTS)
 
   db.healthBar = nil
   db.layout = nil
   db.name = nil
+  db.plate.x = nil
+  db.plate.y = nil
   db.castBar.width = nil
   db.castBar.height = nil
   db.castBar.x = nil
@@ -128,8 +151,8 @@ local function InitializeDatabase()
 
   db.plate.width = ClampNumber(db.plate.width, DEFAULTS.plate.width, 20, 800)
   db.plate.height = ClampNumber(db.plate.height, DEFAULTS.plate.height, 8, 300)
-  db.plate.x = ClampNumber(db.plate.x, DEFAULTS.plate.x, -500, 500)
-  db.plate.y = ClampNumber(db.plate.y, DEFAULTS.plate.y, -500, 500)
+  db.plate.offsetX = ClampNumber(db.plate.offsetX, DEFAULTS.plate.offsetX, -500, 500)
+  db.plate.offsetY = ClampNumber(db.plate.offsetY, DEFAULTS.plate.offsetY, -500, 500)
   db.plate.alpha = ClampNumber(db.plate.alpha, DEFAULTS.plate.alpha, 0, 1)
 
   db.castBorder.width = ClampNumber(db.castBorder.width, DEFAULTS.castBorder.width, 20, 800)
@@ -160,15 +183,24 @@ local function IsAccessible(value)
 end
 
 local function IsUsableRegion(region)
-  if not IsAccessible(region) or region == nil then
+  if region == nil or not IsAccessible(region) then
     return false
   end
-  if type(region.CanBeAccessedInContext) == "function" and not region:CanBeAccessedInContext() then
-    return false
+
+  if type(region.CanBeAccessedInContext) == "function" then
+    local canAccess = region:CanBeAccessedInContext()
+    if not IsAccessible(canAccess) or type(canAccess) ~= "boolean" or canAccess ~= true then
+      return false
+    end
   end
-  if type(region.IsForbidden) == "function" and region:IsForbidden() then
-    return false
+
+  if type(region.IsForbidden) == "function" then
+    local forbidden = region:IsForbidden()
+    if not IsAccessible(forbidden) or type(forbidden) ~= "boolean" or forbidden ~= false then
+      return false
+    end
   end
+
   return true
 end
 
@@ -185,6 +217,7 @@ local FrameByUnit = {}
 local RefreshAfterCombat = false
 local RefreshScheduled = false
 local HooksInstalled = false
+local SettingsRegistered = false
 
 local function GetState(unitFrame, create)
   local state = StateByFrame[unitFrame]
@@ -192,6 +225,7 @@ local function GetState(unitFrame, create)
     state = {
       generation = 0,
       active = false,
+      prepared = false,
     }
     StateByFrame[unitFrame] = state
   end
@@ -217,10 +251,7 @@ local function GetHealthBar(unitFrame)
 end
 
 local function HideOwnedRegions(state)
-  if not state then
-    return
-  end
-  if IsUsableRegion(state.plate) then
+  if state and IsUsableRegion(state.plate) then
     state.plate:Hide()
   end
 end
@@ -292,7 +323,7 @@ local function ConfigurePlate(state, healthBar)
 
   plate:SetTexture(MEDIA.PLATE)
   plate:ClearAllPoints()
-  plate:SetPoint("CENTER", healthBar, "CENTER", DB.plate.x, DB.plate.y)
+  plate:SetPoint("CENTER", healthBar, "CENTER", DB.plate.offsetX, DB.plate.offsetY)
   plate:SetSize(DB.plate.width, DB.plate.height)
   plate:SetAlpha(DB.plate.alpha)
   plate:Show()
@@ -304,7 +335,9 @@ local function ApplyFrame(unitFrame, expectedGeneration)
   if not state or not state.active or state.generation ~= expectedGeneration then
     return false
   end
+
   if not RuntimeSupported or not DB.enabled then
+    PendingByFrame[unitFrame] = nil
     HideOwnedRegions(state)
     local castModule = _G.RothBlizzPlates_CastBar
     if castModule and type(castModule.Release) == "function" then
@@ -312,6 +345,7 @@ local function ApplyFrame(unitFrame, expectedGeneration)
     end
     return false
   end
+
   if InCombatLockdown() then
     PendingByFrame[unitFrame] = expectedGeneration
     return false
@@ -337,13 +371,15 @@ local function ApplyFrame(unitFrame, expectedGeneration)
 end
 
 local function RequestApply(unitFrame)
-  if not IsAccessible(unitFrame) then
+  if unitFrame == nil or not IsAccessible(unitFrame) then
     return false
   end
+
   local state = GetState(unitFrame, false)
   if not state or not state.active then
     return false
   end
+
   if InCombatLockdown() then
     PendingByFrame[unitFrame] = state.generation
     return false
@@ -354,32 +390,59 @@ local function RequestApply(unitFrame)
   return ApplyFrame(unitFrame, state.generation)
 end
 
-local function ActivateFrame(unitFrame, unit)
+local function PrepareAssignment(unitFrame)
   if not IsUsableRegion(unitFrame) then
-    return
+    return false
   end
 
   local state = GetState(unitFrame, true)
-  if not state.active then
-    state.generation = state.generation + 1
-    state.active = true
+  if state.unit then
+    FrameByUnit[state.unit] = nil
   end
 
+  state.unit = nil
+  state.generation = state.generation + 1
+  state.active = false
+  state.prepared = true
+  PendingByFrame[unitFrame] = nil
+  HideOwnedRegions(state)
+
+  local castModule = _G.RothBlizzPlates_CastBar
+  if castModule and type(castModule.Prepare) == "function" then
+    castModule.Prepare(unitFrame)
+  end
+
+  return true
+end
+
+local function ActivatePreparedFrame(unitFrame, unit)
+  if not IsUsableRegion(unitFrame) then
+    return false
+  end
+
+  local state = GetState(unitFrame, true)
+  if not state.prepared and not PrepareAssignment(unitFrame) then
+    return false
+  end
+
+  state = GetState(unitFrame, false)
+  state.prepared = false
+  state.active = true
+
   if IsUsableUnitToken(unit) then
-    if state.unit and state.unit ~= unit then
-      FrameByUnit[state.unit] = nil
-    end
     state.unit = unit
     FrameByUnit[unit] = unitFrame
   end
 
   RequestApply(unitFrame)
+  return true
 end
 
 local function ReleaseFrame(unitFrame)
-  if not IsAccessible(unitFrame) then
+  if unitFrame == nil or not IsAccessible(unitFrame) then
     return
   end
+
   local state = GetState(unitFrame, false)
   if not state then
     return
@@ -390,6 +453,7 @@ local function ReleaseFrame(unitFrame)
   end
   state.unit = nil
   state.active = false
+  state.prepared = false
   state.generation = state.generation + 1
   PendingByFrame[unitFrame] = nil
   HideOwnedRegions(state)
@@ -424,7 +488,18 @@ local function ResolveNamePlateUnit(unit)
     return
   end
 
-  ActivateFrame(unitFrame, unit)
+  local state = GetState(unitFrame, false)
+  if state and state.active then
+    if state.unit and state.unit ~= unit then
+      FrameByUnit[state.unit] = nil
+    end
+    state.unit = unit
+    FrameByUnit[unit] = unitFrame
+    RequestApply(unitFrame)
+    return
+  end
+
+  ActivatePreparedFrame(unitFrame, unit)
 end
 
 local function ReleaseNamePlateUnit(unit)
@@ -469,12 +544,16 @@ local function RefreshVisible()
     return
   end
 
-  for index = 1, #plates do
-    local namePlate = plates[index]
+  for _, namePlate in pairs(plates) do
     if IsUsableRegion(namePlate) then
       local unitFrame = namePlate.UnitFrame
       if IsUsableRegion(unitFrame) then
-        ActivateFrame(unitFrame)
+        local state = GetState(unitFrame, false)
+        if state and state.active then
+          RequestApply(unitFrame)
+        else
+          ActivatePreparedFrame(unitFrame)
+        end
       end
     end
   end
@@ -512,17 +591,95 @@ local function FlushPending()
   end
 end
 
-local function InstallNamePlateHooks()
-  if HooksInstalled or type(hooksecurefunc) ~= "function" or type(NamePlateUnitFrameMixin) ~= "table" then
+local function RegisterBooleanSetting(category, variable, key, tableRef, label, defaultValue, tooltip)
+  local setting = Settings.RegisterAddOnSetting(
+    category,
+    variable,
+    key,
+    tableRef,
+    Settings.VarType.Boolean,
+    label,
+    defaultValue
+  )
+  Settings.CreateCheckbox(category, setting, tooltip)
+  setting:SetValueChangedCallback(ScheduleRefresh)
+end
+
+local function InitializeSettings()
+  if SettingsRegistered or not Settings
+    or type(Settings.RegisterVerticalLayoutCategory) ~= "function"
+    or type(Settings.RegisterAddOnSetting) ~= "function"
+    or type(Settings.CreateCheckbox) ~= "function"
+    or type(Settings.RegisterAddOnCategory) ~= "function" then
     return false
   end
-  if type(NamePlateUnitFrameMixin.ApplyFrameOptions) ~= "function"
+
+  local category = Settings.RegisterVerticalLayoutCategory("Roth Blizzard Plates")
+  RegisterBooleanSetting(
+    category,
+    "ROTHBLIZZPLATES_PLATE_ENABLED",
+    "enabled",
+    DB.plate,
+    "Roth plate artwork",
+    DEFAULTS.plate.enabled,
+    "Show the addon-owned Roth frame around Blizzard health bars."
+  )
+  RegisterBooleanSetting(
+    category,
+    "ROTHBLIZZPLATES_CASTBAR_ENABLED",
+    "enabled",
+    DB.castBar,
+    "Roth cast border",
+    DEFAULTS.castBar.enabled,
+    "Show addon-owned interruptible and non-interruptible cast borders."
+  )
+  RegisterBooleanSetting(
+    category,
+    "ROTHBLIZZPLATES_GLOBAL_FONT",
+    "useGlobal",
+    DB.font,
+    "Use Blizzard font",
+    DEFAULTS.font.useGlobal,
+    "Use the standard game font instead of the bundled Diablo-style font."
+  )
+  RegisterBooleanSetting(
+    category,
+    "ROTHBLIZZPLATES_FONT_SHADOW",
+    "shadow",
+    DB.font,
+    "Font shadow",
+    DEFAULTS.font.shadow,
+    "Apply a one-pixel shadow to nameplate text."
+  )
+
+  Settings.RegisterAddOnCategory(category)
+  SettingsRegistered = true
+  return true
+end
+
+local function InstallNamePlateHooks()
+  if HooksInstalled or type(hooksecurefunc) ~= "function"
+    or type(NamePlateBaseMixin) ~= "table"
+    or type(NamePlateUnitFrameMixin) ~= "table" then
+    return false
+  end
+  if type(NamePlateBaseMixin.AcquireUnitFrame) ~= "function"
+    or type(NamePlateUnitFrameMixin.ApplyFrameOptions) ~= "function"
+    or type(NamePlateUnitFrameMixin.OnUnitSet) ~= "function"
     or type(NamePlateUnitFrameMixin.OnUnitCleared) ~= "function" then
     return false
   end
 
+  hooksecurefunc(NamePlateBaseMixin, "AcquireUnitFrame", function(namePlateBase)
+    if IsUsableRegion(namePlateBase) then
+      PrepareAssignment(namePlateBase.UnitFrame)
+    end
+  end)
   hooksecurefunc(NamePlateUnitFrameMixin, "ApplyFrameOptions", function(unitFrame)
     RequestApply(unitFrame)
+  end)
+  hooksecurefunc(NamePlateUnitFrameMixin, "OnUnitSet", function(unitFrame)
+    ActivatePreparedFrame(unitFrame)
   end)
   hooksecurefunc(NamePlateUnitFrameMixin, "OnUnitCleared", function(unitFrame)
     ReleaseFrame(unitFrame)
@@ -533,28 +690,18 @@ local function InstallNamePlateHooks()
 end
 
 local EventFrame = CreateFrame("Frame")
-EventFrame:RegisterEvent("ADDON_LOADED")
 EventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 EventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
+EventFrame:RegisterEvent("PLAYER_LOGIN")
 EventFrame:RegisterEvent("PLAYER_ENTERING_WORLD")
 EventFrame:RegisterEvent("PLAYER_REGEN_ENABLED")
 EventFrame:SetScript("OnEvent", function(_, event, ...)
-  if event == "ADDON_LOADED" then
-    local loadedAddon = ...
-    if loadedAddon == "Blizzard_NamePlates" then
-      InstallNamePlateHooks()
-      local castModule = _G.RothBlizzPlates_CastBar
-      if castModule and type(castModule.InstallHooks) == "function" then
-        castModule.InstallHooks()
-      end
-      if HooksInstalled and type(EventFrame.UnregisterEvent) == "function" then
-        EventFrame:UnregisterEvent("ADDON_LOADED")
-      end
-    end
-  elseif event == "NAME_PLATE_UNIT_ADDED" then
+  if event == "NAME_PLATE_UNIT_ADDED" then
     ResolveNamePlateUnit(...)
   elseif event == "NAME_PLATE_UNIT_REMOVED" then
     ReleaseNamePlateUnit(...)
+  elseif event == "PLAYER_LOGIN" then
+    InitializeSettings()
   elseif event == "PLAYER_ENTERING_WORLD" then
     InstallNamePlateHooks()
     ScheduleRefresh()
@@ -564,9 +711,7 @@ EventFrame:SetScript("OnEvent", function(_, event, ...)
 end)
 
 InstallNamePlateHooks()
-if HooksInstalled and type(EventFrame.UnregisterEvent) == "function" then
-  EventFrame:UnregisterEvent("ADDON_LOADED")
-elseif EventUtil and type(EventUtil.ContinueOnAddOnLoaded) == "function" then
+if not HooksInstalled and EventUtil and type(EventUtil.ContinueOnAddOnLoaded) == "function" then
   EventUtil.ContinueOnAddOnLoaded("Blizzard_NamePlates", InstallNamePlateHooks)
 end
 
@@ -608,6 +753,8 @@ _G.RothBlizzPlates = {
   RequestApply = RequestApply,
   Refresh = ScheduleRefresh,
   Release = ReleaseFrame,
+  Prepare = PrepareAssignment,
+  Activate = ActivatePreparedFrame,
   IsRuntimeSupported = function()
     return RuntimeSupported
   end,

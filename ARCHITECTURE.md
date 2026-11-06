@@ -1,51 +1,76 @@
 # Architecture
 
-## Ownership boundary
+## Ownership
 
-Blizzard owns nameplate creation, unit assignment, protected geometry, health/cast progress, cast icon/text, visibility, targeting, threat, and state derivation. RothBlizzPlates owns only its decorative textures and font choices.
+Blizzard owns nameplate creation, pooled unit frames, unit assignment, protected geometry, health/cast progress, icon/text, visibility, target/threat state, and cast-state derivation.
 
-The addon never reads unit health, names, GUIDs, auras, combat-log payloads, or cast payloads to derive presentation state.
+RothBlizzPlates owns only:
+
+- one decorative plate texture per pooled unit frame;
+- two decorative cast-border textures per pooled cast bar;
+- SavedVariables and standard Settings controls;
+- font presentation;
+- generation-tagged deferred presentation work.
 
 ## Source contract
 
 Target: Retail `12.1.5`, interface `120105`.
 
-Selected source: Blizzard UI build `12.1.5.70688`, commit `d07eb00237d8891f153215db98a5df880a26cfe5`.
+Selected source: build `12.1.5.70688`, commit `d07eb00237d8891f153215db98a5df880a26cfe5`.
 
-Canonical paths used:
+Canonical source paths:
 
-- health bar: `unitFrame.HealthBarsContainer.healthBar`
-- cast bar: `unitFrame.CastBarsContainer.castBar`
-- frame-option lifecycle: `NamePlateUnitFrameMixin:ApplyFrameOptions`
-- recycle lifecycle: `NamePlateUnitFrameMixin:OnUnitCleared`
-- cast start: `CastingBarMixin:GetEffectiveType(..., notInterruptible, ...)`
+- `NamePlateBaseMixin:AcquireUnitFrame`
+- `NamePlateUnitFrameMixin:ApplyFrameOptions`
+- `NamePlateUnitFrameMixin:OnUnitSet`
+- `NamePlateUnitFrameMixin:OnUnitCleared`
+- `unitFrame.HealthBarsContainer.healthBar`
+- `unitFrame.CastBarsContainer.castBar`
+- `CastingBarMixin:GetEffectiveType(..., notInterruptible, ...)`
 
-## Lifecycle
+## Assignment lifecycle
 
-`NAME_PLATE_UNIT_ADDED` resolves exactly one plate. `NAME_PLATE_UNIT_REMOVED` and `OnUnitCleared` invalidate its generation, clear assignment state, hide owned regions, and discard deferred work.
+```text
+AcquireUnitFrame
+  -> PrepareAssignment
+  -> cast module creates/reuses hidden owned layers
+  -> OwnerByCastBar is installed before SetUnit
 
-Combat deferral is weak-keyed by unit frame and tagged with the current generation. `PLAYER_REGEN_ENABLED` performs one bounded flush. Inaccessible or missing objects are skipped; they are not placed in retry loops.
+Blizzard SetUnit / GetEffectiveType
+  -> secret-capable notInterruptible
+  -> direct SetAlphaFromBoolean sinks
 
-A visible-nameplate scan exists only for initial/explicit refresh and is coalesced.
+OnUnitSet
+  -> activate prepared generation
+  -> apply plate, fonts, and cast geometry
 
-## Secret interruptibility
+OnUnitCleared / NAME_PLATE_UNIT_REMOVED fallback
+  -> generation++
+  -> discard pending work
+  -> hide owned regions
+  -> clear cast ownership
+```
 
-The cast module maintains two addon-owned border textures. Potentially secret booleans are sent directly to `Region:SetAlphaFromBoolean`:
+`NAME_PLATE_UNIT_ADDED` remains a bounded fallback and unit-token map owner. Normal correctness no longer depends on event-handler ordering.
 
-- Blizzard's `GetEffectiveType` receives `notInterruptible` for cast starts and later transitions.
-- The secure post-hook forwards an inaccessible value unchanged.
-- The documented accessible `nil` case fails closed to the blocked presentation before entering the sink.
+## Security boundary
 
-No Lua branch, comparison, negation, format operation, log call, or color inference touches a secret value.
+- `CanBeAccessedInContext` and `IsForbidden` returns are checked with `canaccessvalue`/`issecretvalue` before type checks or comparisons.
+- Secret interruptibility is never compared, negated, keyed, formatted, logged, stored, or deferred.
+- `SetAlphaFromBoolean` is the only secret conditional presentation sink.
+- Unknown accessible interruptibility, including documented `nil`, fails closed to non-interruptible art.
+- No child-tree scans, color inference, raw unit-data reads, broad global hooks, or retry loops exist.
 
-## Deliberate non-features
+## Geometry boundary
 
-The addon does not:
+Native health bars, cast bars, icons, text, and parent frames are never resized, moved, reparented, hidden, or assigned a replacement status-bar texture.
 
-- resize or reanchor Blizzard health/cast bars;
-- move the native cast icon or text;
-- suppress target or threat highlights;
-- traverse frame children;
-- infer interruptibility from colors or textures;
-- hook guessed global function names;
-- use `pcall` as a permissions mechanism.
+Geometry calls target only addon-owned textures. Plate coordinates are health-bar-relative; cast-border coordinates are cast-bar-relative.
+
+## Deferred work
+
+The core stores one weak-key generation per pending unit frame. Combat exit applies only work whose frame is still active and whose generation still matches. Assignment preparation and release both invalidate stale generations.
+
+## Evidence ceiling
+
+Offline tests prove the mocked lifecycle and static ownership policy. They do not prove visual alignment, current-client taint behavior, restricted encounter behavior, or performance in a live client.
