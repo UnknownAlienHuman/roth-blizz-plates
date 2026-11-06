@@ -9,9 +9,14 @@ NamePlateBaseMixin:AcquireUnitFrame
         -> create/reuse two hidden owned textures
         -> OwnerByCastBar[castBar] = unitFrame
 
-CastingBarMixin:GetEffectiveType(..., notInterruptible, ...)
+NamePlateCastingBarMixin:GetEffectiveType(..., notInterruptible, ...)
   -> cast.UpdateFromNotInterruptible
   -> Texture:SetAlphaFromBoolean (two complementary layers)
+
+Hook owner selection
+  -> exact NamePlateCastingBarMixin if already created
+  -> otherwise source CastingBarMixin before CreateFromMixins copies it
+  -> exactly one installed hook
 
 NamePlateUnitFrameMixin:OnUnitSet
   -> core.ActivatePreparedFrame
