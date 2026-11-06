@@ -1,32 +1,34 @@
 # Code graph
 
 ```text
-NAME_PLATE_UNIT_ADDED(unit)
-  -> C_NamePlate.GetNamePlateForUnit(unit)
-  -> ActivateFrame(unitFrame)
-  -> RequestApply(unitFrame)
-  -> ApplyFrame(unitFrame, generation)
-     -> ConfigurePlate(owned texture)
-     -> ApplyFonts()
-     -> CastBar.Apply(unitFrame)
+NamePlateBaseMixin:AcquireUnitFrame
+  -> core.PrepareAssignment(unitFrame)
+     -> generation++
+     -> cast.Prepare(unitFrame)
         -> CastBarsContainer.castBar
-        -> EnsureState(two owned textures)
-        -> conservative initial border
+        -> create/reuse two hidden owned textures
+        -> OwnerByCastBar[castBar] = unitFrame
 
 CastingBarMixin:GetEffectiveType(..., notInterruptible, ...)
-  -> UpdateFromNotInterruptible()
-  -> SetAlphaFromBoolean()
+  -> cast.UpdateFromNotInterruptible
+  -> Texture:SetAlphaFromBoolean (two complementary layers)
 
-NAME_PLATE_UNIT_REMOVED(unit) / OnUnitCleared(unitFrame)
-  -> ReleaseFrame(unitFrame)
-     -> generation++
-     -> drop pending work
-     -> hide owned plate
-     -> CastBar.Release(unitFrame)
+NamePlateUnitFrameMixin:OnUnitSet
+  -> core.ActivatePreparedFrame
+  -> core.ApplyFrame
+     -> owned plate texture on HealthBarsContainer.healthBar
+     -> fonts
+     -> cast.Apply
 
-combat acquisition / layout callback
-  -> PendingByFrame[unitFrame] = generation
+ApplyFrameOptions / explicit refresh
+  -> idempotent RequestApply
+
+OnUnitCleared / removal fallback
+  -> ReleaseFrame
+  -> invalidate generation
+  -> hide owned regions
+  -> clear cast owner
+
 PLAYER_REGEN_ENABLED
-  -> one bounded flush
-  -> stale generations discarded
+  -> one bounded generation-checked flush
 ```

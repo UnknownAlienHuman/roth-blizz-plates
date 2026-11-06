@@ -1,28 +1,10 @@
 # Code index
 
-## `core.lua`
-
-- SavedVariables migration, defaults, and bounds
-- interface gate (`120105`)
-- exact nameplate acquire/release lifecycle
-- generation-checked combat deferral
-- addon-owned plate texture
-- font presentation
-- exact Blizzard nameplate hooks
-- `/rbp status` and `/rbp refresh`
-
-## `castbar_12_1.lua`
-
-- canonical `CastBarsContainer.castBar` resolver
-- two addon-owned interruptibility border textures
-- secret-safe `SetAlphaFromBoolean` routing
-- exact `CastingBarMixin` hooks
-- recycle cleanup
-
-## `tests/test_combat_deferral.lua`
-
-Mocked lifecycle and secret-signal regression test.
-
-## `tests/static_check.py`
-
-Source invariants and banned-pattern check.
+| File | Owner |
+|---|---|
+| `RothBlizzPlates.toc` | Retail 12.1.5 metadata, SavedVariables, load order, source pin |
+| `core.lua` | Schema migration, Settings, object-security gates, exact nameplate lifecycle, plate/font presentation, combat deferral |
+| `castbar_12_1.lua` | Canonical castbar owner, acquisition preparation, secret boolean sinks, cast-layer cleanup |
+| `tests/test_combat_deferral.lua` | Mock lifecycle, migration, secret/recycle/combat/settings regression |
+| `tests/static_check.py` | Ownership and forbidden-pattern policy checks |
+| `media/` | One font, one plate texture, and two cast-border textures |

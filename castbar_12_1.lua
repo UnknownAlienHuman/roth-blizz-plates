@@ -22,15 +22,24 @@ local function IsAccessible(value)
 end
 
 local function IsUsableRegion(region)
-  if not IsAccessible(region) or region == nil then
+  if region == nil or not IsAccessible(region) then
     return false
   end
-  if type(region.CanBeAccessedInContext) == "function" and not region:CanBeAccessedInContext() then
-    return false
+
+  if type(region.CanBeAccessedInContext) == "function" then
+    local canAccess = region:CanBeAccessedInContext()
+    if not IsAccessible(canAccess) or type(canAccess) ~= "boolean" or canAccess ~= true then
+      return false
+    end
   end
-  if type(region.IsForbidden) == "function" and region:IsForbidden() then
-    return false
+
+  if type(region.IsForbidden) == "function" then
+    local forbidden = region:IsForbidden()
+    if not IsAccessible(forbidden) or type(forbidden) ~= "boolean" or forbidden ~= false then
+      return false
+    end
   end
+
   return true
 end
 
@@ -81,6 +90,7 @@ local function CreateBorderTexture(castBar)
   if not IsUsableRegion(texture) then
     return nil
   end
+  texture:Hide()
   return texture
 end
 
@@ -127,6 +137,8 @@ local function EnsureState(unitFrame, castBar)
     interruptible = interruptible,
     notInterruptible = blockedTexture,
     needsInitialSignal = true,
+    prepared = false,
+    alphaOn = 255,
   }
   StateByFrame[unitFrame] = state
   OwnerByCastBar[castBar] = unitFrame
@@ -134,8 +146,8 @@ local function EnsureState(unitFrame, castBar)
 end
 
 local function NormalizeNotInterruptible(value)
-  -- UnitCastingInfo documents this result as nilable. Only inspect values that
-  -- can be accessed normally; secret booleans pass through untouched.
+  -- UnitCastingInfo documents this result as nilable. Only inspect ordinary
+  -- values; secret booleans pass through untouched to the native sink.
   if IsAccessible(value) then
     if type(value) == "boolean" then
       return value
@@ -147,7 +159,6 @@ end
 
 local function ApplyNotInterruptibleSignal(state, notInterruptible)
   -- Do not inspect, compare, negate, stringify, store, or log a secret value.
-  -- Both addon-owned textures consume it through the native boolean sink.
   notInterruptible = NormalizeNotInterruptible(notInterruptible)
   local alphaOn = state.alphaOn or 255
   state.notInterruptible:SetAlphaFromBoolean(notInterruptible, alphaOn, 0)
@@ -163,6 +174,40 @@ local function UpdateFromNotInterruptible(castBar, notInterruptible)
 
   ApplyNotInterruptibleSignal(state, notInterruptible)
   state.needsInitialSignal = false
+end
+
+local function Prepare(unitFrame)
+  if not IsUsableRegion(unitFrame) or InCombatLockdown() then
+    return false
+  end
+
+  local db = _G.RothBlizzPlatesDB
+  if type(db) ~= "table" or not db.enabled
+    or type(db.castBar) ~= "table" or not db.castBar.enabled
+    or type(db.castBorder) ~= "table" then
+    return false
+  end
+
+  local castBar = GetCastBar(unitFrame)
+  if not castBar then
+    return false
+  end
+
+  local state = EnsureState(unitFrame, castBar)
+  if not state then
+    return false
+  end
+  if state.prepared then
+    OwnerByCastBar[castBar] = unitFrame
+    return true
+  end
+
+  HideState(state)
+  state.alphaOn = math.floor((db.castBorder.alpha * 255) + 0.5)
+  state.needsInitialSignal = true
+  state.prepared = true
+  OwnerByCastBar[castBar] = unitFrame
+  return true
 end
 
 local function Apply(unitFrame)
@@ -181,6 +226,7 @@ local function Apply(unitFrame)
     if existing and existing.castBar then
       OwnerByCastBar[existing.castBar] = nil
       existing.needsInitialSignal = true
+      existing.prepared = false
     end
     return true
   end
@@ -204,6 +250,8 @@ local function Apply(unitFrame)
   end
 
   local border = db.castBorder
+  state.alphaOn = math.floor((border.alpha * 255) + 0.5)
+
   ConfigureTexture(
     state.interruptible,
     CAST_INTERRUPTIBLE,
@@ -223,19 +271,18 @@ local function Apply(unitFrame)
     border.offsetY
   )
 
-  state.alphaOn = math.floor((border.alpha * 255) + 0.5)
-
-  -- Conservative state only for a new/recycled assignment. Reconfiguration
-  -- never overwrites an existing secret alpha decision.
+  -- A signal captured between AcquireUnitFrame and OnUnitSet is preserved.
+  -- If no signal arrived, start conservatively as non-interruptible.
   if state.needsInitialSignal then
     ApplyNotInterruptibleSignal(state, true)
     state.needsInitialSignal = false
   end
+  state.prepared = false
   return true
 end
 
 local function Release(unitFrame)
-  if not IsAccessible(unitFrame) then
+  if unitFrame == nil or not IsAccessible(unitFrame) then
     return
   end
   local state = StateByFrame[unitFrame]
@@ -248,6 +295,7 @@ local function Release(unitFrame)
     OwnerByCastBar[state.castBar] = nil
   end
   state.needsInitialSignal = true
+  state.prepared = false
 end
 
 local function InstallHooks()
@@ -258,9 +306,8 @@ local function InstallHooks()
     return false
   end
 
-  -- GetEffectiveType receives the exact notInterruptible argument for both cast
-  -- start and later interruptibility transitions. The hook forwards it without
-  -- inspecting it.
+  -- GetEffectiveType receives the exact notInterruptible argument for cast start
+  -- and later interruptibility transitions. Forward it without inspection.
   hooksecurefunc(CastingBarMixin, "GetEffectiveType", function(castBar, _, notInterruptible)
     if OwnerByCastBar[castBar] then
       UpdateFromNotInterruptible(castBar, notInterruptible)
@@ -277,6 +324,7 @@ if not HooksInstalled and EventUtil and type(EventUtil.ContinueOnAddOnLoaded) ==
 end
 
 _G.RothBlizzPlates_CastBar = {
+  Prepare = Prepare,
   Apply = Apply,
   Release = Release,
   InstallHooks = InstallHooks,
