@@ -74,3 +74,7 @@ The core stores one weak-key generation per pending unit frame. Combat exit appl
 ## Evidence ceiling
 
 Offline tests prove the mocked lifecycle and static ownership policy. They do not prove visual alignment, current-client taint behavior, restricted encounter behavior, or performance in a live client.
+
+## Persistence compatibility
+
+Schemas `0..4` are normalized into schema 4. A numeric schema greater than 4 is left byte-for-byte under user ownership: no defaults are merged, no fields are deleted, Settings are not registered, and presentation remains disabled. `/rbp status` reports interface and database compatibility separately.

@@ -7,7 +7,7 @@ Roth-style presentation for Blizzard-owned nameplates and cast bars on World of 
 ## Compatibility
 
 - Retail interface: `120105`
-- Addon version: `0.3.1`
+- Addon version: `0.3.2`
 - Selected Blizzard source baseline: `12.1.5.70688`
 - Source commit: `d07eb00237d8891f153215db98a5df880a26cfe5`
 - External libraries: none
@@ -21,6 +21,13 @@ Roth-style presentation for Blizzard-owned nameplates and cast bars on World of 
 - Secret-capable object-security results are gated before Lua boolean operations.
 - Potentially secret `notInterruptible` flows directly into `SetAlphaFromBoolean` without comparison, negation, logging, or persistence.
 - Combat-deferred work is weak-keyed and generation-checked, so recycled frames cannot receive stale work.
+
+## Changes in 0.3.2
+
+- Reject unknown newer SavedVariables schemas without merging defaults, deleting fields, or rewriting the schema version.
+- Disable presentation and Settings registration on a future schema, with one explicit login warning and diagnostic status fields.
+- Keep cast preparation disabled while either the interface or database contract is unsupported.
+- Add a dedicated future-schema regression test.
 
 ## Changes in 0.3.1
 
@@ -42,10 +49,11 @@ Roth-style presentation for Blizzard-owned nameplates and cast bars on World of 
 texlua --luaconly core.lua
 texlua --luaconly castbar_12_1.lua
 texlua tests/test_combat_deferral.lua .
+texlua tests/test_future_schema.lua .
 python3 tests/static_check.py
 ```
 
-The regression covers migration, canonical ownership, exact acquire/set/clear lifecycle, initial secret-signal capture, secret object-security rejection, combat deferral, stale-work rejection, recycle cleanup, settings refresh, and absence of native geometry or status-bar texture writes.
+The regressions cover supported-schema migration, future-schema downgrade rejection, canonical ownership, exact acquire/set/clear lifecycle, initial secret-signal capture, secret object-security rejection, combat deferral, stale-work rejection, recycle cleanup, settings refresh, and absence of native geometry or status-bar texture writes.
 
 Live Retail validation remains required for visual alignment, real cast/channel transitions, UI-scale/nameplate-setting combinations, non-Latin fonts, and taint/forbidden-action logs.
 

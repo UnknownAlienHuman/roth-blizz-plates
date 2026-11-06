@@ -96,6 +96,9 @@ local function InitializeDatabase()
   end
 
   local previousSchema = type(db.schemaVersion) == "number" and db.schemaVersion or 0
+  if previousSchema > SCHEMA_VERSION then
+    return db, false, previousSchema
+  end
 
   -- Schema 3: cast-border coordinates became offsets relative to the native
   -- cast bar. Preserve old tuning before deleting the obsolete cast geometry.
@@ -167,10 +170,10 @@ local function InitializeDatabase()
   end
 
   db.schemaVersion = SCHEMA_VERSION
-  return db
+  return db, true, SCHEMA_VERSION
 end
 
-local DB = InitializeDatabase()
+local DB, DatabaseSupported, DatabaseSchemaVersion = InitializeDatabase()
 
 local function IsAccessible(value)
   if type(canaccessvalue) == "function" then
@@ -209,7 +212,8 @@ local function IsUsableUnitToken(unit)
 end
 
 local interfaceVersion = select(4, GetBuildInfo())
-local RuntimeSupported = interfaceVersion == EXPECTED_INTERFACE
+local InterfaceSupported = interfaceVersion == EXPECTED_INTERFACE
+local RuntimeSupported = InterfaceSupported and DatabaseSupported
 
 local StateByFrame = setmetatable({}, { __mode = "k" })
 local PendingByFrame = setmetatable({}, { __mode = "k" })
@@ -408,7 +412,7 @@ local function PrepareAssignment(unitFrame)
   HideOwnedRegions(state)
 
   local castModule = _G.RothBlizzPlates_CastBar
-  if castModule and type(castModule.Prepare) == "function" then
+  if RuntimeSupported and castModule and type(castModule.Prepare) == "function" then
     castModule.Prepare(unitFrame)
   end
 
@@ -606,7 +610,7 @@ local function RegisterBooleanSetting(category, variable, key, tableRef, label, 
 end
 
 local function InitializeSettings()
-  if SettingsRegistered or not Settings
+  if SettingsRegistered or not DatabaseSupported or not Settings
     or type(Settings.RegisterVerticalLayoutCategory) ~= "function"
     or type(Settings.RegisterAddOnSetting) ~= "function"
     or type(Settings.CreateCheckbox) ~= "function"
@@ -701,7 +705,13 @@ EventFrame:SetScript("OnEvent", function(_, event, ...)
   elseif event == "NAME_PLATE_UNIT_REMOVED" then
     ReleaseNamePlateUnit(...)
   elseif event == "PLAYER_LOGIN" then
-    InitializeSettings()
+    if not DatabaseSupported then
+      print(("RothBlizzPlates: SavedVariables schema %s is newer than supported schema %d; presentation is disabled to prevent downgrade."):format(
+        tostring(DatabaseSchemaVersion), SCHEMA_VERSION
+      ))
+    else
+      InitializeSettings()
+    end
   elseif event == "PLAYER_ENTERING_WORLD" then
     InstallNamePlateHooks()
     ScheduleRefresh()
@@ -741,8 +751,9 @@ SlashCmdList.ROTHBLIZZPLATES = function(message)
     print("RothBlizzPlates: refresh scheduled.")
   elseif message == "status" then
     local active, pending = CountState()
-    print(("RothBlizzPlates: interface=%s supported=%s active=%d pending=%d"):format(
-      tostring(interfaceVersion), tostring(RuntimeSupported), active, pending
+    print(("RothBlizzPlates: interface=%s interfaceSupported=%s dbSchema=%s dbSupported=%s active=%d pending=%d"):format(
+      tostring(interfaceVersion), tostring(InterfaceSupported), tostring(DatabaseSchemaVersion),
+      tostring(DatabaseSupported), active, pending
     ))
   else
     print("RothBlizzPlates: /rbp status | /rbp refresh")
@@ -757,6 +768,9 @@ _G.RothBlizzPlates = {
   Activate = ActivatePreparedFrame,
   IsRuntimeSupported = function()
     return RuntimeSupported
+  end,
+  GetCompatibilityStatus = function()
+    return InterfaceSupported, DatabaseSupported, DatabaseSchemaVersion
   end,
   GetStateCounts = CountState,
 }
