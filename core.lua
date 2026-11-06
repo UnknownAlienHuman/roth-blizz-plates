@@ -88,6 +88,25 @@ local function MergeDefaults(target, defaults)
   end
 end
 
+local function ResolveSchemaVersion(rawVersion)
+  if rawVersion == nil then
+    return 0, nil
+  end
+
+  if type(rawVersion) ~= "number"
+    or rawVersion ~= rawVersion
+    or rawVersion < 0
+    or rawVersion ~= math.floor(rawVersion) then
+    return nil, "invalid"
+  end
+
+  if rawVersion > SCHEMA_VERSION then
+    return rawVersion, "newer"
+  end
+
+  return rawVersion, nil
+end
+
 local function InitializeDatabase()
   local db = _G.RothBlizzPlatesDB
   if type(db) ~= "table" then
@@ -95,9 +114,9 @@ local function InitializeDatabase()
     _G.RothBlizzPlatesDB = db
   end
 
-  local previousSchema = type(db.schemaVersion) == "number" and db.schemaVersion or 0
-  if previousSchema > SCHEMA_VERSION then
-    return db, false, previousSchema
+  local previousSchema, schemaFailure = ResolveSchemaVersion(db.schemaVersion)
+  if schemaFailure then
+    return db, false, db.schemaVersion, schemaFailure
   end
 
   -- Schema 3: cast-border coordinates became offsets relative to the native
@@ -170,10 +189,10 @@ local function InitializeDatabase()
   end
 
   db.schemaVersion = SCHEMA_VERSION
-  return db, true, SCHEMA_VERSION
+  return db, true, SCHEMA_VERSION, nil
 end
 
-local DB, DatabaseSupported, DatabaseSchemaVersion = InitializeDatabase()
+local DB, DatabaseSupported, DatabaseSchemaVersion, DatabaseFailureReason = InitializeDatabase()
 
 local function IsAccessible(value)
   if type(canaccessvalue) == "function" then
@@ -217,6 +236,8 @@ local RuntimeSupported = InterfaceSupported and DatabaseSupported
 
 local StateByFrame = setmetatable({}, { __mode = "k" })
 local PendingByFrame = setmetatable({}, { __mode = "k" })
+local PendingFontRestoreByFrame = setmetatable({}, { __mode = "k" })
+local FontStateByString = setmetatable({}, { __mode = "k" })
 local FrameByUnit = {}
 local RefreshAfterCombat = false
 local RefreshScheduled = false
@@ -260,9 +281,125 @@ local function HideOwnedRegions(state)
   end
 end
 
+local function ReadFontPresentation(fontString)
+  if not IsUsableRegion(fontString) or type(fontString.GetFont) ~= "function" then
+    return nil
+  end
+
+  local fontFile, height, flags = fontString:GetFont()
+  if not IsAccessible(fontFile) or type(fontFile) ~= "string"
+    or not IsAccessible(height) or type(height) ~= "number"
+    or not IsAccessible(flags) or type(flags) ~= "string" then
+    return nil
+  end
+
+  local presentation = {
+    fontFile = fontFile,
+    height = height,
+    flags = flags,
+  }
+
+  if type(fontString.GetShadowOffset) == "function" then
+    local shadowX, shadowY = fontString:GetShadowOffset()
+    if IsAccessible(shadowX) and type(shadowX) == "number"
+      and IsAccessible(shadowY) and type(shadowY) == "number" then
+      presentation.shadowX = shadowX
+      presentation.shadowY = shadowY
+    end
+  end
+
+  if type(fontString.GetShadowColor) == "function" then
+    local shadowR, shadowG, shadowB, shadowA = fontString:GetShadowColor()
+    if IsAccessible(shadowR) and type(shadowR) == "number"
+      and IsAccessible(shadowG) and type(shadowG) == "number"
+      and IsAccessible(shadowB) and type(shadowB) == "number"
+      and IsAccessible(shadowA) and type(shadowA) == "number" then
+      presentation.shadowR = shadowR
+      presentation.shadowG = shadowG
+      presentation.shadowB = shadowB
+      presentation.shadowA = shadowA
+    end
+  end
+
+  return presentation
+end
+
+local function SameOptionalNumber(left, right)
+  if left == nil or right == nil then
+    return left == right
+  end
+  return math.abs(left - right) <= 0.001
+end
+
+local function SameFontPresentation(left, right)
+  if not left or not right then
+    return false
+  end
+
+  return left.fontFile == right.fontFile
+    and left.flags == right.flags
+    and math.abs(left.height - right.height) <= 0.001
+    and SameOptionalNumber(left.shadowX, right.shadowX)
+    and SameOptionalNumber(left.shadowY, right.shadowY)
+    and SameOptionalNumber(left.shadowR, right.shadowR)
+    and SameOptionalNumber(left.shadowG, right.shadowG)
+    and SameOptionalNumber(left.shadowB, right.shadowB)
+    and SameOptionalNumber(left.shadowA, right.shadowA)
+end
+
+local function RestoreFont(fontString)
+  local state = FontStateByString[fontString]
+  if not state then
+    return true
+  end
+  if InCombatLockdown() or not IsUsableRegion(fontString) then
+    return false
+  end
+
+  local current = ReadFontPresentation(fontString)
+  if state.applied and current and not SameFontPresentation(current, state.applied) then
+    -- Another owner refreshed this FontString after our last apply. Relinquish
+    -- ownership instead of overwriting the newer ordinary presentation.
+    FontStateByString[fontString] = nil
+    return true
+  end
+
+  local original = state.original
+  fontString:SetFont(original.fontFile, original.height, original.flags)
+
+  if original.shadowX ~= nil and type(fontString.SetShadowOffset) == "function" then
+    fontString:SetShadowOffset(original.shadowX, original.shadowY)
+  end
+  if original.shadowR ~= nil and type(fontString.SetShadowColor) == "function" then
+    fontString:SetShadowColor(original.shadowR, original.shadowG, original.shadowB, original.shadowA)
+  end
+
+  FontStateByString[fontString] = nil
+  return true
+end
+
 local function ApplyFont(fontString)
-  if not DB.font.enabled or not IsUsableRegion(fontString) or type(fontString.SetFont) ~= "function" then
+  if not IsUsableRegion(fontString) or type(fontString.SetFont) ~= "function" then
     return
+  end
+
+  if not DB.font.enabled then
+    RestoreFont(fontString)
+    return
+  end
+
+  local current = ReadFontPresentation(fontString)
+  if not current then
+    return
+  end
+
+  local state = FontStateByString[fontString]
+  if not state then
+    state = { original = current }
+    FontStateByString[fontString] = state
+  elseif state.applied and not SameFontPresentation(current, state.applied) then
+    -- Blizzard refreshed this pooled FontString after our previous pass.
+    state.original = current
   end
 
   local fontPath = MEDIA.FONT
@@ -271,6 +408,7 @@ local function ApplyFont(fontString)
   end
 
   fontString:SetFont(fontPath, DB.font.size, DB.font.outline)
+
   if type(fontString.SetShadowOffset) == "function" then
     if DB.font.shadow then
       fontString:SetShadowOffset(1, -1)
@@ -281,20 +419,46 @@ local function ApplyFont(fontString)
       fontString:SetShadowOffset(0, 0)
     end
   end
+
+  state.applied = ReadFontPresentation(fontString) or {
+    fontFile = fontPath,
+    height = DB.font.size,
+    flags = DB.font.outline,
+  }
 end
 
-local function ApplyFonts(unitFrame, healthBar)
-  ApplyFont(unitFrame.name)
-  ApplyFont(healthBar.Text)
-  ApplyFont(healthBar.LeftText)
-  ApplyFont(healthBar.RightText)
+local function VisitFontStrings(unitFrame, healthBar, callback)
+  if not IsUsableRegion(unitFrame) then
+    return
+  end
+
+  callback(unitFrame.name)
+
+  if IsUsableRegion(healthBar) then
+    callback(healthBar.Text)
+    callback(healthBar.LeftText)
+    callback(healthBar.RightText)
+  end
 
   local castContainer = unitFrame.CastBarsContainer
   local castBar = IsUsableRegion(castContainer) and castContainer.castBar or nil
   if IsUsableRegion(castBar) then
-    ApplyFont(castBar.Text)
-    ApplyFont(castBar.CastTargetNameText)
+    callback(castBar.Text)
+    callback(castBar.CastTargetNameText)
   end
+end
+
+local function ApplyFonts(unitFrame, healthBar)
+  VisitFontStrings(unitFrame, healthBar, ApplyFont)
+end
+
+local function RestoreFrameFonts(unitFrame)
+  if InCombatLockdown() then
+    return false
+  end
+
+  VisitFontStrings(unitFrame, GetHealthBar(unitFrame), RestoreFont)
+  return true
 end
 
 local function EnsurePlate(state, healthBar)
@@ -343,6 +507,7 @@ local function ApplyFrame(unitFrame, expectedGeneration)
   if not RuntimeSupported or not DB.enabled then
     PendingByFrame[unitFrame] = nil
     HideOwnedRegions(state)
+    RestoreFrameFonts(unitFrame)
     local castModule = _G.RothBlizzPlates_CastBar
     if castModule and type(castModule.Release) == "function" then
       castModule.Release(unitFrame)
@@ -409,6 +574,7 @@ local function PrepareAssignment(unitFrame)
   state.active = false
   state.prepared = true
   PendingByFrame[unitFrame] = nil
+  PendingFontRestoreByFrame[unitFrame] = nil
   HideOwnedRegions(state)
 
   local castModule = _G.RothBlizzPlates_CastBar
@@ -432,6 +598,7 @@ local function ActivatePreparedFrame(unitFrame, unit)
   state = GetState(unitFrame, false)
   state.prepared = false
   state.active = true
+  PendingFontRestoreByFrame[unitFrame] = nil
 
   if IsUsableUnitToken(unit) then
     state.unit = unit
@@ -465,6 +632,13 @@ local function ReleaseFrame(unitFrame)
   local castModule = _G.RothBlizzPlates_CastBar
   if castModule and type(castModule.Release) == "function" then
     castModule.Release(unitFrame)
+  end
+
+  if InCombatLockdown() then
+    PendingFontRestoreByFrame[unitFrame] = state.generation
+  else
+    PendingFontRestoreByFrame[unitFrame] = nil
+    RestoreFrameFonts(unitFrame)
   end
 end
 
@@ -522,6 +696,7 @@ local function HideAllOwnedRegions()
   local castModule = _G.RothBlizzPlates_CastBar
   for unitFrame, state in pairs(StateByFrame) do
     HideOwnedRegions(state)
+    RestoreFrameFonts(unitFrame)
     if castModule and type(castModule.Release) == "function" then
       castModule.Release(unitFrame)
     end
@@ -531,12 +706,12 @@ end
 local function RefreshVisible()
   RefreshScheduled = false
 
-  if not RuntimeSupported or not DB.enabled then
-    HideAllOwnedRegions()
-    return
-  end
   if InCombatLockdown() then
     RefreshAfterCombat = true
+    return
+  end
+  if not RuntimeSupported or not DB.enabled then
+    HideAllOwnedRegions()
     return
   end
   if not C_NamePlate or type(C_NamePlate.GetNamePlates) ~= "function" then
@@ -586,6 +761,14 @@ local function FlushPending()
     local state = GetState(unitFrame, false)
     if state and state.active and state.generation == generation then
       ApplyFrame(unitFrame, generation)
+    end
+  end
+
+  for unitFrame, generation in pairs(PendingFontRestoreByFrame) do
+    PendingFontRestoreByFrame[unitFrame] = nil
+    local state = GetState(unitFrame, false)
+    if state and not state.active and state.generation == generation then
+      RestoreFrameFonts(unitFrame)
     end
   end
 
@@ -706,9 +889,15 @@ EventFrame:SetScript("OnEvent", function(_, event, ...)
     ReleaseNamePlateUnit(...)
   elseif event == "PLAYER_LOGIN" then
     if not DatabaseSupported then
-      print(("RothBlizzPlates: SavedVariables schema %s is newer than supported schema %d; presentation is disabled to prevent downgrade."):format(
-        tostring(DatabaseSchemaVersion), SCHEMA_VERSION
-      ))
+      if DatabaseFailureReason == "newer" then
+        print(("RothBlizzPlates: SavedVariables schema %s is newer than supported schema %d; presentation is disabled to prevent downgrade."):format(
+          tostring(DatabaseSchemaVersion), SCHEMA_VERSION
+        ))
+      else
+        print(("RothBlizzPlates: SavedVariables schema value %s is invalid; presentation is disabled to prevent destructive migration."):format(
+          tostring(DatabaseSchemaVersion)
+        ))
+      end
     else
       InitializeSettings()
     end
@@ -751,9 +940,9 @@ SlashCmdList.ROTHBLIZZPLATES = function(message)
     print("RothBlizzPlates: refresh scheduled.")
   elseif message == "status" then
     local active, pending = CountState()
-    print(("RothBlizzPlates: interface=%s interfaceSupported=%s dbSchema=%s dbSupported=%s active=%d pending=%d"):format(
+    print(("RothBlizzPlates: interface=%s interfaceSupported=%s dbSchema=%s dbSupported=%s dbReason=%s active=%d pending=%d"):format(
       tostring(interfaceVersion), tostring(InterfaceSupported), tostring(DatabaseSchemaVersion),
-      tostring(DatabaseSupported), active, pending
+      tostring(DatabaseSupported), tostring(DatabaseFailureReason), active, pending
     ))
   else
     print("RothBlizzPlates: /rbp status | /rbp refresh")
@@ -770,7 +959,7 @@ _G.RothBlizzPlates = {
     return RuntimeSupported
   end,
   GetCompatibilityStatus = function()
-    return InterfaceSupported, DatabaseSupported, DatabaseSchemaVersion
+    return InterfaceSupported, DatabaseSupported, DatabaseSchemaVersion, DatabaseFailureReason
   end,
   GetStateCounts = CountState,
 }

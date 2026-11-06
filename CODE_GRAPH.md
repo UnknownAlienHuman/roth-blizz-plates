@@ -22,10 +22,11 @@ NamePlateUnitFrameMixin:OnUnitSet
   -> core.ActivatePreparedFrame
   -> core.ApplyFrame
      -> owned plate texture on HealthBarsContainer.healthBar
-     -> fonts
+     -> snapshot/apply native FontStrings
      -> cast.Apply
 
 ApplyFrameOptions / explicit refresh
+  -> detect Blizzard font refresh
   -> idempotent RequestApply
 
 OnUnitCleared / removal fallback
@@ -33,7 +34,10 @@ OnUnitCleared / removal fallback
   -> invalidate generation
   -> hide owned regions
   -> clear cast owner
+  -> restore fonts now or queue generation-tagged restore
 
 PLAYER_REGEN_ENABLED
-  -> one bounded generation-checked flush
+  -> bounded apply flush
+  -> bounded font-restore flush
+  -> stale generations discarded
 ```
