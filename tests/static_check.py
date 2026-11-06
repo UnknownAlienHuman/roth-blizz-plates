@@ -29,9 +29,14 @@ assert "NormalizeNotInterruptible" in cast
 assert "notInterruptible and" not in cast
 assert "not notInterruptible" not in cast
 assert "## Interface: 120105" in toc
-assert "## Version: 0.3.1" in toc
+assert "## Version: 0.3.2" in toc
 assert "local EXPECTED_INTERFACE = 120105" in core
 assert "local SCHEMA_VERSION = 4" in core
+assert "if previousSchema > SCHEMA_VERSION then" in core
+assert "return db, false, previousSchema" in core
+assert "InterfaceSupported and DatabaseSupported" in core
+assert "not DatabaseSupported or not Settings" in core
+assert "RuntimeSupported and castModule" in core
 assert "d07eb00237d8891f153215db98a5df880a26cfe5" in toc
 assert core.count("C_NamePlate.GetNamePlates()") == 1
 assert "NamePlateBaseMixin, \"AcquireUnitFrame\"" in core

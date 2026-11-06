@@ -11,3 +11,4 @@ Before changing runtime code:
 7. Keep assignment work generation-scoped; acquisition prepares, `OnUnitSet` activates, `OnUnitCleared` releases.
 8. Do not add polling, recursive child scans, color inference, raw unit-data reads, guessed hooks, or unbounded retries.
 9. Run every command in `README.md`; report live-client checks as `NOT-RUN` unless actually captured.
+10. Unknown newer SavedVariables schemas must remain untouched and disable runtime presentation; never best-effort downgrade them.
