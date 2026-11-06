@@ -230,6 +230,24 @@ local function IsUsableUnitToken(unit)
   return IsAccessible(unit) and type(unit) == "string"
 end
 
+local function IsReadableTable(value)
+  if not IsAccessible(value) or type(value) ~= "table" then
+    return false
+  end
+  if type(canaccesstable) == "function" and canaccesstable(value) ~= true then
+    return false
+  end
+  return true
+end
+
+local function NormalizeLayoutScale(value)
+  if not IsAccessible(value) or type(value) ~= "number"
+    or value ~= value or value < 0.25 or value > 4 then
+    return nil
+  end
+  return value
+end
+
 local interfaceVersion = select(4, GetBuildInfo())
 local InterfaceSupported = interfaceVersion == EXPECTED_INTERFACE
 local RuntimeSupported = InterfaceSupported and DatabaseSupported
@@ -251,10 +269,40 @@ local function GetState(unitFrame, create)
       generation = 0,
       active = false,
       prepared = false,
+      scaleX = 1,
+      scaleY = 1,
+      scaleReady = false,
     }
     StateByFrame[unitFrame] = state
   end
   return state
+end
+
+local function CaptureFrameScale(unitFrame, setupOptions)
+  if not IsUsableRegion(unitFrame) or not IsReadableTable(setupOptions) then
+    return false
+  end
+
+  local scaleX = NormalizeLayoutScale(setupOptions.horizontalScale)
+  local scaleY = NormalizeLayoutScale(setupOptions.verticalScale)
+  if not scaleX or not scaleY then
+    return false
+  end
+
+  local state = GetState(unitFrame, true)
+  state.scaleX = scaleX
+  state.scaleY = scaleY
+  state.scaleReady = true
+  return true
+end
+
+local function EnsureFrameScale(unitFrame, state)
+  if state.scaleReady then
+    return state.scaleX, state.scaleY
+  end
+
+  CaptureFrameScale(unitFrame, _G.NamePlateSetupOptions)
+  return state.scaleX or 1, state.scaleY or 1
 end
 
 local function GetHealthBar(unitFrame)
@@ -378,7 +426,7 @@ local function RestoreFont(fontString)
   return true
 end
 
-local function ApplyFont(fontString)
+local function ApplyFont(fontString, scaleY)
   if not IsUsableRegion(fontString) or type(fontString.SetFont) ~= "function" then
     return
   end
@@ -407,7 +455,8 @@ local function ApplyFont(fontString)
     fontPath = STANDARD_TEXT_FONT
   end
 
-  fontString:SetFont(fontPath, DB.font.size, DB.font.outline)
+  scaleY = NormalizeLayoutScale(scaleY) or 1
+  fontString:SetFont(fontPath, DB.font.size * scaleY, DB.font.outline)
 
   if type(fontString.SetShadowOffset) == "function" then
     if DB.font.shadow then
@@ -422,34 +471,34 @@ local function ApplyFont(fontString)
 
   state.applied = ReadFontPresentation(fontString) or {
     fontFile = fontPath,
-    height = DB.font.size,
+    height = DB.font.size * scaleY,
     flags = DB.font.outline,
   }
 end
 
-local function VisitFontStrings(unitFrame, healthBar, callback)
+local function VisitFontStrings(unitFrame, healthBar, callback, argument)
   if not IsUsableRegion(unitFrame) then
     return
   end
 
-  callback(unitFrame.name)
+  callback(unitFrame.name, argument)
 
   if IsUsableRegion(healthBar) then
-    callback(healthBar.Text)
-    callback(healthBar.LeftText)
-    callback(healthBar.RightText)
+    callback(healthBar.Text, argument)
+    callback(healthBar.LeftText, argument)
+    callback(healthBar.RightText, argument)
   end
 
   local castContainer = unitFrame.CastBarsContainer
   local castBar = IsUsableRegion(castContainer) and castContainer.castBar or nil
   if IsUsableRegion(castBar) then
-    callback(castBar.Text)
-    callback(castBar.CastTargetNameText)
+    callback(castBar.Text, argument)
+    callback(castBar.CastTargetNameText, argument)
   end
 end
 
-local function ApplyFonts(unitFrame, healthBar)
-  VisitFontStrings(unitFrame, healthBar, ApplyFont)
+local function ApplyFonts(unitFrame, healthBar, scaleY)
+  VisitFontStrings(unitFrame, healthBar, ApplyFont, scaleY)
 end
 
 local function RestoreFrameFonts(unitFrame)
@@ -489,10 +538,19 @@ local function ConfigurePlate(state, healthBar)
     return false
   end
 
+  local scaleX = state.scaleX or 1
+  local scaleY = state.scaleY or 1
+
   plate:SetTexture(MEDIA.PLATE)
   plate:ClearAllPoints()
-  plate:SetPoint("CENTER", healthBar, "CENTER", DB.plate.offsetX, DB.plate.offsetY)
-  plate:SetSize(DB.plate.width, DB.plate.height)
+  plate:SetPoint(
+    "CENTER",
+    healthBar,
+    "CENTER",
+    DB.plate.offsetX * scaleX,
+    DB.plate.offsetY * scaleY
+  )
+  plate:SetSize(DB.plate.width * scaleX, DB.plate.height * scaleY)
   plate:SetAlpha(DB.plate.alpha)
   plate:Show()
   return true
@@ -525,14 +583,15 @@ local function ApplyFrame(unitFrame, expectedGeneration)
     return false
   end
 
+  local scaleX, scaleY = EnsureFrameScale(unitFrame, state)
   if not ConfigurePlate(state, healthBar) then
     return false
   end
-  ApplyFonts(unitFrame, healthBar)
+  ApplyFonts(unitFrame, healthBar, scaleY)
 
   local castModule = _G.RothBlizzPlates_CastBar
   if castModule and type(castModule.Apply) == "function" then
-    castModule.Apply(unitFrame)
+    castModule.Apply(unitFrame, scaleX, scaleY)
   end
 
   PendingByFrame[unitFrame] = nil
@@ -573,6 +632,10 @@ local function PrepareAssignment(unitFrame)
   state.generation = state.generation + 1
   state.active = false
   state.prepared = true
+  state.scaleX = 1
+  state.scaleY = 1
+  state.scaleReady = false
+  CaptureFrameScale(unitFrame, _G.NamePlateSetupOptions)
   PendingByFrame[unitFrame] = nil
   PendingFontRestoreByFrame[unitFrame] = nil
   HideOwnedRegions(state)
@@ -862,7 +925,8 @@ local function InstallNamePlateHooks()
       PrepareAssignment(namePlateBase.UnitFrame)
     end
   end)
-  hooksecurefunc(NamePlateUnitFrameMixin, "ApplyFrameOptions", function(unitFrame)
+  hooksecurefunc(NamePlateUnitFrameMixin, "ApplyFrameOptions", function(unitFrame, setupOptions)
+    CaptureFrameScale(unitFrame, setupOptions)
     RequestApply(unitFrame)
   end)
   hooksecurefunc(NamePlateUnitFrameMixin, "OnUnitSet", function(unitFrame)

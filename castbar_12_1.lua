@@ -43,6 +43,14 @@ local function IsUsableRegion(region)
   return true
 end
 
+local function NormalizeLayoutScale(value)
+  if not IsAccessible(value) or type(value) ~= "number"
+    or value ~= value or value < 0.25 or value > 4 then
+    return 1
+  end
+  return value
+end
+
 local function GetCastBar(unitFrame)
   if not IsUsableRegion(unitFrame) then
     return nil
@@ -218,7 +226,7 @@ local function Prepare(unitFrame)
   return true
 end
 
-local function Apply(unitFrame)
+local function Apply(unitFrame, scaleX, scaleY)
   if not IsUsableRegion(unitFrame) then
     return false
   end
@@ -258,25 +266,27 @@ local function Apply(unitFrame)
   end
 
   local border = db.castBorder
+  scaleX = NormalizeLayoutScale(scaleX)
+  scaleY = NormalizeLayoutScale(scaleY)
   state.alphaOn = math.floor((border.alpha * 255) + 0.5)
 
   ConfigureTexture(
     state.interruptible,
     CAST_INTERRUPTIBLE,
     castBar,
-    border.width,
-    border.height,
-    border.offsetX,
-    border.offsetY
+    border.width * scaleX,
+    border.height * scaleY,
+    border.offsetX * scaleX,
+    border.offsetY * scaleY
   )
   ConfigureTexture(
     state.notInterruptible,
     CAST_NOT_INTERRUPTIBLE,
     castBar,
-    border.width,
-    border.height,
-    border.offsetX,
-    border.offsetY
+    border.width * scaleX,
+    border.height * scaleY,
+    border.offsetX * scaleX,
+    border.offsetY * scaleY
   )
 
   -- A signal captured between AcquireUnitFrame and OnUnitSet is preserved.

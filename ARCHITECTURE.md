@@ -2,7 +2,7 @@
 
 ## Ownership
 
-Blizzard owns nameplate creation, pooled unit frames, unit assignment, protected geometry, health/cast progress, icon/text, visibility, target/threat state, and cast-state derivation.
+Blizzard owns nameplate creation, pooled unit frames, unit assignment, protected geometry, health/cast progress, icon/text, visibility, target/threat state, cast-state derivation, and the `nameplateSize` CVar.
 
 RothBlizzPlates owns only:
 
@@ -36,8 +36,15 @@ Canonical source paths:
 ```text
 AcquireUnitFrame
   -> PrepareAssignment
+  -> reset assignment generation and stale layout scale
+  -> capture current global setup scale as a late-attach fallback
   -> cast module creates/reuses hidden owned layers
   -> OwnerByCastBar is installed before SetUnit
+
+Blizzard ApplyFrameOptions(setupOptions)
+  -> validate ordinary horizontalScale / verticalScale
+  -> retain exact current native size scale
+  -> active assignment: reapply owned presentation once
 
 Blizzard SetUnit / NamePlateCastingBarMixin:GetEffectiveType
   -> secret-capable notInterruptible
@@ -45,11 +52,7 @@ Blizzard SetUnit / NamePlateCastingBarMixin:GetEffectiveType
 
 OnUnitSet
   -> activate prepared generation
-  -> apply plate, reversible fonts, and cast art
-
-ApplyFrameOptions
-  -> observe a new Blizzard font baseline
-  -> reapply addon presentation
+  -> apply scaled plate, reversible fonts, and scaled cast art
 
 OnUnitCleared / NAME_PLATE_UNIT_REMOVED fallback
   -> generation++
@@ -60,6 +63,19 @@ OnUnitCleared / NAME_PLATE_UNIT_REMOVED fallback
 ```
 
 `NAME_PLATE_UNIT_ADDED` remains a bounded fallback and unit-token map owner. Normal correctness no longer depends on event-handler ordering.
+
+## Native size integration
+
+Blizzard's `nameplateSize` setting selects a source-owned scale record. The driver writes its `horizontal` and `vertical` values into `NamePlateSetupOptions`, then passes that table to `NamePlateUnitFrameMixin:ApplyFrameOptions`.
+
+RothBlizzPlates consumes only those ordinary setup values:
+
+- plate width and X offset use `horizontalScale`;
+- plate height and Y offset use `verticalScale`;
+- cast-border width/X and height/Y use the same axes;
+- custom font height follows `verticalScale`.
+
+The addon never reads native region geometry to infer scale and never writes the CVar or native frame size. Missing, inaccessible, NaN, or implausible scale values leave the last valid assignment scale intact. A late-attach fallback uses the current selected-source `NamePlateSetupOptions` table once; the exact post-hook remains authoritative.
 
 ## Cast hook and current-state recovery
 
@@ -75,7 +91,7 @@ A late attach or combat-deferred apply can miss the hook signal. In that case, `
 
 Before the first font mutation, the addon snapshots font file, height, flags, shadow offset, and shadow color. A later Blizzard refresh observed through `ApplyFrameOptions` replaces the baseline before the Roth style is reapplied.
 
-Disable/release restores the current baseline outside combat. Combat release queues one generation-tagged restore. Reassignment invalidates stale restore work. If the current presentation no longer matches the last Roth-applied presentation, cleanup treats it as a newer foreign-owner update and relinquishes ownership without overwriting it.
+The Roth font's configured medium-size height is multiplied by Blizzard's current vertical nameplate scale. Disable/release restores the current native baseline outside combat. Combat release queues one generation-tagged restore. Reassignment invalidates stale restore work. If the current presentation no longer matches the last Roth-applied presentation, cleanup treats it as a newer foreign-owner update and relinquishes ownership without overwriting it.
 
 ## Security boundary
 
@@ -83,6 +99,7 @@ Disable/release restores the current baseline outside combat. Combat release que
 - Secret interruptibility is never compared, negated, keyed, formatted, logged, stored, or deferred.
 - `SetAlphaFromBoolean` is the only secret conditional presentation sink.
 - Accessible unknown `notInterruptible`, including documented `nil`, fails closed.
+- Scale fields are consumed only after table/value access gates and strict numeric bounds.
 - No child-tree scans, color inference, raw unit-data reads, broad guessed hooks, or retry loops exist.
 
 ## Geometry boundary
@@ -95,4 +112,4 @@ A missing schema is treated as legacy schema 0. Only finite non-negative whole n
 
 ## Evidence ceiling
 
-Offline tests prove the mocked lifecycle, persistence, hook-owner, current-state, and restoration policies. They do not prove visual alignment, current-client taint behavior, restricted encounter behavior, or live performance.
+Offline tests prove the mocked lifecycle, persistence, hook-owner, current-state, restoration, and native-size integration policies. They do not prove visual alignment, current-client taint behavior, restricted encounter behavior, or live performance.
