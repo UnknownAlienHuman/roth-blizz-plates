@@ -165,6 +165,14 @@ local function ApplyNotInterruptibleSignal(state, notInterruptible)
   state.interruptible:SetAlphaFromBoolean(notInterruptible, 0, alphaOn)
 end
 
+local function ApplyInterruptibleSignal(state, isInterruptible)
+  -- IsInterruptable returns an ordinary or secret boolean. Route it directly
+  -- into complementary native sinks without inspecting or inverting it in Lua.
+  local alphaOn = state.alphaOn or 255
+  state.interruptible:SetAlphaFromBoolean(isInterruptible, alphaOn, 0)
+  state.notInterruptible:SetAlphaFromBoolean(isInterruptible, 0, alphaOn)
+end
+
 local function UpdateFromNotInterruptible(castBar, notInterruptible)
   local unitFrame = OwnerByCastBar[castBar]
   local state = unitFrame and StateByFrame[unitFrame] or nil
@@ -272,9 +280,15 @@ local function Apply(unitFrame)
   )
 
   -- A signal captured between AcquireUnitFrame and OnUnitSet is preserved.
-  -- If no signal arrived, start conservatively as non-interruptible.
+  -- If no hook signal arrived (late load or combat deferral), ask Blizzard for
+  -- the current possibly-secret interruptible boolean and route it directly
+  -- into the native sinks. Method absence alone falls back conservatively.
   if state.needsInitialSignal then
-    ApplyNotInterruptibleSignal(state, true)
+    if type(castBar.IsInterruptable) == "function" then
+      ApplyInterruptibleSignal(state, castBar:IsInterruptable())
+    else
+      ApplyNotInterruptibleSignal(state, true)
+    end
     state.needsInitialSignal = false
   end
   state.prepared = false

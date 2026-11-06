@@ -11,7 +11,11 @@ NamePlateBaseMixin:AcquireUnitFrame
 
 NamePlateCastingBarMixin:GetEffectiveType(..., notInterruptible, ...)
   -> cast.UpdateFromNotInterruptible
-  -> Texture:SetAlphaFromBoolean (two complementary layers)
+  -> complementary Texture:SetAlphaFromBoolean calls
+
+Late attachment / missed hook signal
+  -> castBar:IsInterruptable()
+  -> direct complementary SetAlphaFromBoolean calls
 
 Hook owner selection
   -> exact NamePlateCastingBarMixin if already created
@@ -22,11 +26,11 @@ NamePlateUnitFrameMixin:OnUnitSet
   -> core.ActivatePreparedFrame
   -> core.ApplyFrame
      -> owned plate texture on HealthBarsContainer.healthBar
-     -> snapshot/apply native FontStrings
+     -> snapshot/apply reversible fonts
      -> cast.Apply
 
 ApplyFrameOptions / explicit refresh
-  -> detect Blizzard font refresh
+  -> observe refreshed Blizzard font baseline
   -> idempotent RequestApply
 
 OnUnitCleared / removal fallback
@@ -34,7 +38,7 @@ OnUnitCleared / removal fallback
   -> invalidate generation
   -> hide owned regions
   -> clear cast owner
-  -> restore fonts now or queue generation-tagged restore
+  -> restore fonts or queue generation-tagged restore
 
 PLAYER_REGEN_ENABLED
   -> bounded apply flush

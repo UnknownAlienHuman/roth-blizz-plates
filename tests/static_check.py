@@ -26,15 +26,19 @@ assert "unitFrame.CastBarsContainer" in cast
 assert "container.castBar" in cast
 assert "SetAlphaFromBoolean" in cast
 assert "NormalizeNotInterruptible" in cast
+assert "ApplyInterruptibleSignal" in cast
+assert "castBar:IsInterruptable()" in cast
 assert "ResolveHookOwner" in cast
 assert "NamePlateCastingBarMixin.GetEffectiveType" in cast
 assert 'hooksecurefunc(hookOwner, "GetEffectiveType"' in cast
 assert 'hooksecurefunc(CastingBarMixin, "GetEffectiveType"' not in cast
 assert "notInterruptible and" not in cast
 assert "not notInterruptible" not in cast
+assert "isInterruptible and" not in cast
+assert "not isInterruptible" not in cast
 
 assert "## Interface: 120105" in toc
-assert "## Version: 0.3.4" in toc
+assert "## Version: 0.3.5" in toc
 assert "local EXPECTED_INTERFACE = 120105" in core
 assert "local SCHEMA_VERSION = 4" in core
 assert "local function ResolveSchemaVersion" in core
