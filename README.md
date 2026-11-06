@@ -7,7 +7,7 @@ Roth-style presentation for Blizzard-owned nameplates and cast bars on World of 
 ## Compatibility
 
 - Retail interface: `120105`
-- Addon version: `0.3.5`
+- Addon version: `0.3.6`
 - Selected Blizzard source baseline: `12.1.5.70688`
 - Source commit: `d07eb00237d8891f153215db98a5df880a26cfe5`
 - External libraries: none
@@ -18,23 +18,19 @@ Roth-style presentation for Blizzard-owned nameplates and cast bars on World of 
 - The addon creates only its own plate and cast-border textures; native font presentation is snapshotted before modification and restored on disable/release.
 - Canonical paths are `HealthBarsContainer.healthBar` and `CastBarsContainer.castBar`.
 - `AcquireUnitFrame` prepares the cast owner before Blizzard computes the first cast type; `OnUnitSet` activates presentation; `OnUnitCleared` invalidates and restores assignment-scoped state.
+- `ApplyFrameOptions` supplies Blizzard's current horizontal and vertical nameplate scale. Roth plate art, cast borders, offsets, and custom font height follow those values without writing the `nameplateSize` CVar or changing native geometry.
 - The cast hook prefers the exact copied `NamePlateCastingBarMixin`; before that mixin exists, it hooks the source method once so `CreateFromMixins` copies the wrapped function.
 - Potentially secret interruptibility flows directly into complementary `SetAlphaFromBoolean` sinks without comparison, negation, logging, or persistence.
 - Combat-deferred work is weak-keyed and generation-checked, so recycled frames cannot receive stale work.
 
-## Changes in 0.3.5
+## Changes in 0.3.6
 
-- Recover the current cast interruptibility presentation after late attachment or combat deferral through Blizzard's `CastingBarMixin:IsInterruptable()` result.
-- Route that ordinary-or-secret boolean directly into complementary interruptible/non-interruptible alpha sinks; no Lua inversion or branching is performed.
-- Preserve an earlier hook-captured signal when available; method absence alone retains the conservative non-interruptible fallback.
-- Add a regression for the native current-state path while keeping the copied-mixin hook-owner tests.
-
-## Changes in 0.3.4
-
-- Snapshot and restore exact Blizzard font file, flags, shadow offset, and shadow color on disable or pooled-frame release.
-- Defer font restoration through combat and reject stale generations after reassignment.
-- Relinquish ownership instead of overwriting a newer Blizzard/foreign font presentation.
-- Reject malformed SavedVariables schema values without partial migration, deletion, clamping, or rewrite.
+- Scale addon-owned plate and cast-border art with Blizzard's native `nameplateSize` layout.
+- Capture `horizontalScale` and `verticalScale` from the exact `ApplyFrameOptions` lifecycle boundary.
+- Scale artwork offsets and custom font height proportionally for Small through Huge nameplates.
+- Reject inaccessible, non-numeric, NaN, or out-of-contract scale values without replacing the last valid layout.
+- Keep Blizzard as the only owner of the `nameplateSize` CVar and all native frame geometry.
+- Add a focused regression covering Small, Huge, late-attach fallback, secret-scale rejection, texture reuse, and zero native geometry writes.
 
 ## Commands
 
@@ -52,10 +48,11 @@ texlua tests/test_invalid_schema.lua .
 texlua tests/test_font_restore.lua .
 texlua tests/test_castbar_hook_owner.lua .
 texlua tests/test_castbar_hook_preload.lua .
+texlua tests/test_native_scale.lua .
 python3 tests/static_check.py
 ```
 
-The targeted 0.3.5 checks cover the copied hook owner, pre-load hook path, and native current-state secret-boolean sink path. Older lifecycle and persistence regressions remain in the repository; live Retail validation is still required for real cast/channel transitions, visual alignment, UI-scale/nameplate-setting combinations, locale rendering, coexistence, and taint/forbidden-action logs.
+The 0.3.6 targeted checks cover native size scaling and confirm that all geometry writes remain confined to addon-owned textures. Live Retail validation is still required for real cast/channel transitions, visual alignment across nameplate styles and sizes, UI scale, locale rendering, coexistence, and taint/forbidden-action logs.
 
 ## Installation
 

@@ -38,7 +38,7 @@ assert "isInterruptible and" not in cast
 assert "not isInterruptible" not in cast
 
 assert "## Interface: 120105" in toc
-assert "## Version: 0.3.5" in toc
+assert "## Version: 0.3.6" in toc
 assert "local EXPECTED_INTERFACE = 120105" in core
 assert "local SCHEMA_VERSION = 4" in core
 assert "local function ResolveSchemaVersion" in core
@@ -58,6 +58,24 @@ assert "castModule.Prepare(unitFrame)" in core
 assert "plate.offsetX" in core and "plate.offsetY" in core
 assert "for _, namePlate in pairs(plates)" in core
 assert ":SetAlpha(" not in cast
+
+# Native nameplate size is observed from Blizzard's exact frame-options pass.
+# Addon-owned plate/cast art and custom font height use the same horizontal /
+# vertical scale without changing native frame geometry or writing the CVar.
+assert "local function CaptureFrameScale" in core
+assert "local function EnsureFrameScale" in core
+assert "setupOptions.horizontalScale" in core
+assert "setupOptions.verticalScale" in core
+assert 'NamePlateUnitFrameMixin, "ApplyFrameOptions", function(unitFrame, setupOptions)' in core
+assert "DB.plate.width * scaleX" in core
+assert "DB.plate.height * scaleY" in core
+assert "DB.font.size * scaleY" in core
+assert "castModule.Apply(unitFrame, scaleX, scaleY)" in core
+assert "border.width * scaleX" in cast
+assert "border.height * scaleY" in cast
+assert "C_CVar.SetCVar" not in all_lua
+assert "SetCVar(" not in all_lua
+assert "nameplateSize" not in all_lua
 
 # Native font presentation is snapshotted and restored, including deferred
 # release during combat and stale-generation cancellation on reassignment.
