@@ -28,28 +28,46 @@ assert "SetAlphaFromBoolean" in cast
 assert "NormalizeNotInterruptible" in cast
 assert "ResolveHookOwner" in cast
 assert "NamePlateCastingBarMixin.GetEffectiveType" in cast
-assert "hooksecurefunc(hookOwner, \"GetEffectiveType\"" in cast
-assert "hooksecurefunc(CastingBarMixin, \"GetEffectiveType\"" not in cast
+assert 'hooksecurefunc(hookOwner, "GetEffectiveType"' in cast
+assert 'hooksecurefunc(CastingBarMixin, "GetEffectiveType"' not in cast
 assert "notInterruptible and" not in cast
 assert "not notInterruptible" not in cast
+
 assert "## Interface: 120105" in toc
-assert "## Version: 0.3.3" in toc
+assert "## Version: 0.3.4" in toc
 assert "local EXPECTED_INTERFACE = 120105" in core
 assert "local SCHEMA_VERSION = 4" in core
-assert "if previousSchema > SCHEMA_VERSION then" in core
-assert "return db, false, previousSchema" in core
+assert "local function ResolveSchemaVersion" in core
+assert 'return nil, "invalid"' in core
+assert 'return rawVersion, "newer"' in core
+assert "DatabaseFailureReason" in core
 assert "InterfaceSupported and DatabaseSupported" in core
 assert "not DatabaseSupported or not Settings" in core
 assert "RuntimeSupported and castModule" in core
 assert "d07eb00237d8891f153215db98a5df880a26cfe5" in toc
+
 assert core.count("C_NamePlate.GetNamePlates()") == 1
-assert "NamePlateBaseMixin, \"AcquireUnitFrame\"" in core
-assert "NamePlateUnitFrameMixin, \"OnUnitSet\"" in core
-assert "NamePlateUnitFrameMixin, \"OnUnitCleared\"" in core
+assert 'NamePlateBaseMixin, "AcquireUnitFrame"' in core
+assert 'NamePlateUnitFrameMixin, "OnUnitSet"' in core
+assert 'NamePlateUnitFrameMixin, "OnUnitCleared"' in core
 assert "castModule.Prepare(unitFrame)" in core
 assert "plate.offsetX" in core and "plate.offsetY" in core
 assert "for _, namePlate in pairs(plates)" in core
 assert ":SetAlpha(" not in cast
+
+# Native font presentation is snapshotted and restored, including deferred
+# release during combat and stale-generation cancellation on reassignment.
+assert "local FontStateByString" in core
+assert "local PendingFontRestoreByFrame" in core
+assert "local function ReadFontPresentation" in core
+assert "local function RestoreFont" in core
+assert "local function RestoreFrameFonts" in core
+assert "PendingFontRestoreByFrame[unitFrame] = state.generation" in core
+assert "state and not state.active and state.generation == generation" in core
+assert "PendingFontRestoreByFrame[unitFrame] = nil" in core
+assert "not SameFontPresentation(current, state.applied)" in core
+assert "relinquish" in core.lower()
+assert core.index("if InCombatLockdown() then", core.index("local function RefreshVisible")) < core.index("if not RuntimeSupported or not DB.enabled", core.index("local function RefreshVisible"))
 
 # Secret-capable object-security returns are gated before boolean comparison.
 assert "local canAccess = region:CanBeAccessedInContext()" in core
