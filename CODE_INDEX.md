@@ -1,10 +1,28 @@
-# Roth Blizzard Plates code index
+# Code index
 
-| File | Responsibility |
-|---|---|
-| `RothBlizzPlates.toc` | Metadata, SavedVariables and load order |
-| `core.lua` | Media, database defaults, nameplate styling and lifecycle |
-| `castbar.lua` | Cast-bar visual styling |
-| `media/` | Roth fonts, plate, cast-bar and threat textures |
+## `core.lua`
 
-Detailed load/event/state routing is in [`AGENT_GUIDE.md`](AGENT_GUIDE.md).
+- SavedVariables migration, defaults, and bounds
+- interface gate (`120105`)
+- exact nameplate acquire/release lifecycle
+- generation-checked combat deferral
+- addon-owned plate texture
+- font presentation
+- exact Blizzard nameplate hooks
+- `/rbp status` and `/rbp refresh`
+
+## `castbar_12_1.lua`
+
+- canonical `CastBarsContainer.castBar` resolver
+- two addon-owned interruptibility border textures
+- secret-safe `SetAlphaFromBoolean` routing
+- exact `CastingBarMixin` hooks
+- recycle cleanup
+
+## `tests/test_combat_deferral.lua`
+
+Mocked lifecycle and secret-signal regression test.
+
+## `tests/static_check.py`
+
+Source invariants and banned-pattern check.
