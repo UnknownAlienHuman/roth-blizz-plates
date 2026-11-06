@@ -9,6 +9,7 @@ Before changing runtime code:
 5. Gate object-security returns before Lua boolean operations.
 6. Send secret interruptibility only to the documented `SetAlphaFromBoolean` sink.
 7. Keep assignment work generation-scoped; acquisition prepares, `OnUnitSet` activates, `OnUnitCleared` releases.
-8. Do not add polling, recursive child scans, color inference, raw unit-data reads, guessed hooks, or unbounded retries.
-9. Run every command in `README.md`; report live-client checks as `NOT-RUN` unless actually captured.
-10. Unknown newer SavedVariables schemas must remain untouched and disable runtime presentation; never best-effort downgrade them.
+8. Treat `NamePlateCastingBarMixin` as a copied owner: hook it directly after creation, or hook the source once before `CreateFromMixins`; never assume later base-table changes propagate.
+9. Do not add polling, recursive child scans, color inference, raw unit-data reads, guessed hooks, or unbounded retries.
+10. Run every command in `README.md`; report live-client checks as `NOT-RUN` unless actually captured.
+11. Unknown newer SavedVariables schemas must remain untouched and disable runtime presentation; never best-effort downgrade them.

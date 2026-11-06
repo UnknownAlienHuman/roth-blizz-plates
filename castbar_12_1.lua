@@ -298,17 +298,34 @@ local function Release(unitFrame)
   state.prepared = false
 end
 
-local function InstallHooks()
-  if HooksInstalled or type(hooksecurefunc) ~= "function" or type(CastingBarMixin) ~= "table" then
-    return false
+local function ResolveHookOwner()
+  if type(NamePlateCastingBarMixin) == "table"
+    and type(NamePlateCastingBarMixin.GetEffectiveType) == "function" then
+    return NamePlateCastingBarMixin
   end
-  if type(CastingBarMixin.GetEffectiveType) ~= "function" then
+
+  -- Before Blizzard_NamePlates creates NamePlateCastingBarMixin, hook the
+  -- source method once. CreateFromMixins will copy this wrapped function into
+  -- the exact nameplate owner. After creation, the exact owner is preferred.
+  if type(CastingBarMixin) == "table"
+    and type(CastingBarMixin.GetEffectiveType) == "function" then
+    return CastingBarMixin
+  end
+
+  return nil
+end
+
+local function InstallHooks()
+  if HooksInstalled or type(hooksecurefunc) ~= "function" then
     return false
   end
 
-  -- GetEffectiveType receives the exact notInterruptible argument for cast start
-  -- and later interruptibility transitions. Forward it without inspection.
-  hooksecurefunc(CastingBarMixin, "GetEffectiveType", function(castBar, _, notInterruptible)
+  local hookOwner = ResolveHookOwner()
+  if not hookOwner then
+    return false
+  end
+
+  hooksecurefunc(hookOwner, "GetEffectiveType", function(castBar, _, notInterruptible)
     if OwnerByCastBar[castBar] then
       UpdateFromNotInterruptible(castBar, notInterruptible)
     end

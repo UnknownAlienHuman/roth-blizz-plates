@@ -26,7 +26,9 @@ Canonical source paths:
 - `NamePlateUnitFrameMixin:OnUnitCleared`
 - `unitFrame.HealthBarsContainer.healthBar`
 - `unitFrame.CastBarsContainer.castBar`
-- `CastingBarMixin:GetEffectiveType(..., notInterruptible, ...)`
+- `NamePlateCastingBarMixin:GetEffectiveType(..., notInterruptible, ...)`
+
+`NamePlateCastingBarMixin` is created with `CreateFromMixins(CastingBarMixin, NamePlateComponentMixin)`, so its methods are copied rather than dynamically inherited.
 
 ## Assignment lifecycle
 
@@ -36,7 +38,7 @@ AcquireUnitFrame
   -> cast module creates/reuses hidden owned layers
   -> OwnerByCastBar is installed before SetUnit
 
-Blizzard SetUnit / GetEffectiveType
+Blizzard SetUnit / NamePlateCastingBarMixin:GetEffectiveType
   -> secret-capable notInterruptible
   -> direct SetAlphaFromBoolean sinks
 
@@ -53,13 +55,23 @@ OnUnitCleared / NAME_PLATE_UNIT_REMOVED fallback
 
 `NAME_PLATE_UNIT_ADDED` remains a bounded fallback and unit-token map owner. Normal correctness no longer depends on event-handler ordering.
 
+## Cast hook installation
+
+One hook is installed, selected by load order:
+
+- if `NamePlateCastingBarMixin` already exists, hook its copied `GetEffectiveType` method directly;
+- before `Blizzard_NamePlates` creates that mixin, hook `CastingBarMixin:GetEffectiveType` once so `CreateFromMixins` copies the wrapped method;
+- never hook both owners in the same session.
+
+This keeps the normal post-load path scoped to nameplate casts while preserving the pre-load path without polling or guessed global hooks.
+
 ## Security boundary
 
 - `CanBeAccessedInContext` and `IsForbidden` returns are checked with `canaccessvalue`/`issecretvalue` before type checks or comparisons.
 - Secret interruptibility is never compared, negated, keyed, formatted, logged, stored, or deferred.
 - `SetAlphaFromBoolean` is the only secret conditional presentation sink.
 - Unknown accessible interruptibility, including documented `nil`, fails closed to non-interruptible art.
-- No child-tree scans, color inference, raw unit-data reads, broad global hooks, or retry loops exist.
+- No child-tree scans, color inference, raw unit-data reads, broad guessed hooks, or retry loops exist.
 
 ## Geometry boundary
 
