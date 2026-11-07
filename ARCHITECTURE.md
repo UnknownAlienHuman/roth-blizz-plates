@@ -16,7 +16,9 @@ RothBlizzPlates owns only:
 
 Target: Retail `12.1.5`, interface `120105`.
 
-Selected source: build `12.1.5.70688`, commit `d07eb00237d8891f153215db98a5df880a26cfe5`.
+Selected source: build `12.1.5.70783`, commit `297d7aaaa736f346b3e036f38ee088eaf7f8c07f`.
+
+The reviewed `12.1.5.70688 -> 12.1.5.70783` delta does not modify the selected nameplate, castbar, Settings, region, font, or curve implementation. Its only shared Unit API change relevant to the addon's security review marks `UNIT_COMBAT.amount` as secret. RothBlizzPlates does not register `UNIT_COMBAT` or consume that payload, so no runtime adapter changed.
 
 Canonical source paths:
 
@@ -100,6 +102,7 @@ The Roth font's configured medium-size height is multiplied by Blizzard's curren
 - `SetAlphaFromBoolean` is the only secret conditional presentation sink.
 - Accessible unknown `notInterruptible`, including documented `nil`, fails closed.
 - Scale fields are consumed only after table/value access gates and strict numeric bounds.
+- `UNIT_COMBAT` payloads are outside the addon contract; the current source explicitly marks its `amount` field secret.
 - No child-tree scans, color inference, raw unit-data reads, broad guessed hooks, or retry loops exist.
 
 ## Geometry boundary
@@ -112,4 +115,4 @@ A missing schema is treated as legacy schema 0. Only finite non-negative whole n
 
 ## Evidence ceiling
 
-Offline tests prove the mocked lifecycle, persistence, hook-owner, current-state, restoration, and native-size integration policies. They do not prove visual alignment, current-client taint behavior, restricted encounter behavior, or live performance.
+Offline tests prove the mocked lifecycle, persistence, hook-owner, current-state, restoration, and native-size integration policies. The `70783` source review proves only that the selected source contracts did not change; it does not prove visual alignment, current-client taint behavior, restricted encounter behavior, or live performance.
