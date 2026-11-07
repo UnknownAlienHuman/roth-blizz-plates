@@ -18,7 +18,7 @@ local plates = {}
 local plateByUnit = {}
 
 function canaccessvalue() return true end
-function GetBuildInfo() return "12.1.5", "70688", "Oct 2026", 120105 end
+function GetBuildInfo() return "12.1.5", "70783", "Nov 2026", 120105 end
 function GetLocale() return "enUS" end
 function InCombatLockdown() return combat end
 
@@ -56,22 +56,47 @@ local function NewRegion(kind)
   return region
 end
 
+local function NewFontObject(name, height, flags, shadowX, shadowY, shadowR, shadowG, shadowB, shadowA)
+  return {
+    fontFile = name,
+    fontHeight = height,
+    fontFlags = flags,
+    shadowX = shadowX,
+    shadowY = shadowY,
+    shadowR = shadowR,
+    shadowG = shadowG,
+    shadowB = shadowB,
+    shadowA = shadowA,
+  }
+end
+
 local function NewFontString(name, height, flags, shadowX, shadowY, shadowR, shadowG, shadowB, shadowA)
   local fontString = NewRegion("FontString")
-  fontString.fontFile = name
-  fontString.fontHeight = height
-  fontString.fontFlags = flags
-  fontString.shadowX = shadowX
-  fontString.shadowY = shadowY
-  fontString.shadowR = shadowR
-  fontString.shadowG = shadowG
-  fontString.shadowB = shadowB
-  fontString.shadowA = shadowA
+  local initialFontObject = NewFontObject(
+    name, height, flags, shadowX, shadowY, shadowR, shadowG, shadowB, shadowA
+  )
+  fontString.initialFontObject = initialFontObject
 
+  function fontString:SetFontObject(fontObject)
+    self.fontObject = fontObject
+    self.fontFile = fontObject.fontFile
+    self.fontHeight = fontObject.fontHeight
+    self.fontFlags = fontObject.fontFlags
+    self.shadowX = fontObject.shadowX
+    self.shadowY = fontObject.shadowY
+    self.shadowR = fontObject.shadowR
+    self.shadowG = fontObject.shadowG
+    self.shadowB = fontObject.shadowB
+    self.shadowA = fontObject.shadowA
+  end
+  function fontString:GetFontObject()
+    return self.fontObject
+  end
   function fontString:GetFont()
     return self.fontFile, self.fontHeight, self.fontFlags
   end
   function fontString:SetFont(fontFile, fontHeight, fontFlags)
+    self.fontObject = nil
     self.fontFile = fontFile
     self.fontHeight = fontHeight
     self.fontFlags = fontFlags
@@ -93,6 +118,7 @@ local function NewFontString(name, height, flags, shadowX, shadowY, shadowR, sha
     self.shadowA = a
   end
 
+  fontString:SetFontObject(initialFontObject)
   return fontString
 end
 
@@ -195,6 +221,7 @@ local rothFont = "Interface\\AddOns\\RothBlizzPlates\\media\\Diablo-Light.ttf"
 assertFont(unitFrame.name, rothFont, 9, "OUTLINE", 1, -1, 0, 0, 0, 1, "applied name")
 assertFont(healthBar.Text, rothFont, 9, "OUTLINE", 1, -1, 0, 0, 0, 1, "applied health")
 assertFont(castBar.Text, rothFont, 9, "OUTLINE", 1, -1, 0, 0, 0, 1, "applied cast")
+assertEqual(unitFrame.name.fontObject, nil, "direct Roth font detaches native object")
 
 -- A settings refresh during combat is deferred before any native font mutation.
 combat = true
@@ -204,12 +231,15 @@ assertEqual(unitFrame.name.fontFile, rothFont, "combat disable deferred")
 combat = false
 eventFrame:Trigger("PLAYER_REGEN_ENABLED")
 
--- Disabling the font feature restores the exact ordinary Blizzard state.
+-- Disabling the font feature restores both the exact presentation and the
+-- original Blizzard FontObject relationship.
 assertFont(unitFrame.name, "initial-name", 15, "THICKOUTLINE", 5, -5, 0.8, 0.7, 0.6, 0.5, "disabled name")
 assertFont(healthBar.Text, "initial-health", 10, "", 0, 0, 0.2, 0.3, 0.4, 0.5, "disabled health")
 assertFont(castBar.Text, "initial-cast", 13, "", 0, 0, 0.6, 0.5, 0.4, 0.3, "disabled cast")
+assertEqual(unitFrame.name.fontObject, unitFrame.name.initialFontObject, "native name FontObject restored")
+assertEqual(healthBar.Text.fontObject, healthBar.Text.initialFontObject, "native health FontObject restored")
 
--- A later Blizzard refresh becomes the new restoration baseline.
+-- A later direct Blizzard refresh becomes the new restoration baseline.
 RothBlizzPlatesDB.font.enabled = true
 RothBlizzPlates.Refresh()
 unitFrame.name:SetFont("blizzard-refreshed", 17, "MONOCHROME")
@@ -219,6 +249,7 @@ NamePlateUnitFrameMixin.ApplyFrameOptions(unitFrame)
 assertFont(unitFrame.name, rothFont, 9, "OUTLINE", 1, -1, 0, 0, 0, 1, "reapplied name")
 NamePlateUnitFrameMixin.OnUnitCleared(unitFrame)
 assertFont(unitFrame.name, "blizzard-refreshed", 17, "MONOCHROME", 7, -7, 0.11, 0.22, 0.33, 0.44, "release baseline")
+assertEqual(unitFrame.name.fontObject, nil, "direct baseline remains direct")
 
 -- Combat release cannot mutate native font strings; restoration is deferred.
 NamePlateBaseMixin.AcquireUnitFrame(plate)
@@ -255,5 +286,34 @@ unitFrame.name:SetShadowOffset(9, -9)
 unitFrame.name:SetShadowColor(0.12, 0.23, 0.34, 0.45)
 NamePlateUnitFrameMixin.OnUnitCleared(unitFrame)
 assertFont(unitFrame.name, "foreign-owner", 19, "MONOCHROME", 9, -9, 0.12, 0.23, 0.34, 0.45, "foreign owner preserved")
+
+-- A Blizzard refresh through SetFontObject must restore the object itself, not
+-- only a copied file/height/flags snapshot.
+local refreshedObject = NewFontObject(
+  "blizzard-object", 20, "OUTLINE", 10, -10, 0.21, 0.32, 0.43, 0.54
+)
+unitFrame.name:SetFontObject(refreshedObject)
+NamePlateBaseMixin.AcquireUnitFrame(plate)
+NamePlateUnitFrameMixin.OnUnitSet(unitFrame)
+assertEqual(unitFrame.name.fontObject, nil, "Roth apply overrides object locally")
+NamePlateUnitFrameMixin.OnUnitCleared(unitFrame)
+assertEqual(unitFrame.name.fontObject, refreshedObject, "release restores refreshed FontObject")
+assertFont(unitFrame.name, "blizzard-object", 20, "OUTLINE", 10, -10, 0.21, 0.32, 0.43, 0.54, "object restore")
+
+-- If shadow state cannot be read, the addon must not write an irreversible
+-- shadow override even though it can still apply and restore the font object.
+local shadowPlate, shadowFrame = NewUnitFrame("shadow-opaque")
+shadowFrame.name.GetShadowOffset = nil
+shadowFrame.name.GetShadowColor = nil
+local originalShadowX, originalShadowY = shadowFrame.name.shadowX, shadowFrame.name.shadowY
+local originalShadowR, originalShadowA = shadowFrame.name.shadowR, shadowFrame.name.shadowA
+NamePlateBaseMixin.AcquireUnitFrame(shadowPlate)
+NamePlateUnitFrameMixin.OnUnitSet(shadowFrame)
+assertEqual(shadowFrame.name.shadowX, originalShadowX, "opaque shadow offset untouched")
+assertEqual(shadowFrame.name.shadowY, originalShadowY, "opaque shadow Y untouched")
+assertEqual(shadowFrame.name.shadowR, originalShadowR, "opaque shadow color untouched")
+assertEqual(shadowFrame.name.shadowA, originalShadowA, "opaque shadow alpha untouched")
+NamePlateUnitFrameMixin.OnUnitCleared(shadowFrame)
+assertEqual(shadowFrame.name.fontObject, shadowFrame.name.initialFontObject, "opaque-shadow FontObject restored")
 
 print("test_font_restore.lua: ok")
