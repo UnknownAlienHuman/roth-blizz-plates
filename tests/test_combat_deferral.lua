@@ -32,7 +32,7 @@ function canaccessvalue(value)
 end
 
 function GetBuildInfo()
-  return "12.1.5", "70688", "Oct 2026", 120105
+  return "12.1.5", "70783", "Nov 2026", 120105
 end
 
 function GetLocale()
@@ -184,6 +184,11 @@ CastingBarMixin = {
   end,
 }
 
+-- Blizzard copies the base method into this distinct owner table.
+NamePlateCastingBarMixin = {
+  GetEffectiveType = CastingBarMixin.GetEffectiveType,
+}
+
 local function NewUnitFrame()
   local healthBar = NewRegion("StatusBar", true)
   healthBar.Text = NewRegion("FontString", true)
@@ -193,7 +198,7 @@ local function NewUnitFrame()
   local castBar = NewRegion("StatusBar", true)
   castBar.Text = NewRegion("FontString", true)
   castBar.CastTargetNameText = NewRegion("FontString", true)
-  setmetatable(castBar, { __index = CastingBarMixin })
+  setmetatable(castBar, { __index = NamePlateCastingBarMixin })
 
   local healthContainer = NewRegion("Frame", true)
   healthContainer.healthBar = healthBar
@@ -248,7 +253,7 @@ eventFrame:Trigger("PLAYER_LOGIN")
 assertEqual(#registeredSettings, 4, "four standard settings registered")
 
 -- Acquisition happens before Blizzard assigns the unit. Preparing at this
--- boundary lets the cast hook capture the first interruptibility signal.
+-- boundary lets the exact cast hook capture the first interruptibility signal.
 local plate1, unitFrame1, healthBar1, castBar1 = NewUnitFrame()
 plates[1] = plate1
 plateByUnit.nameplate1 = plate1
@@ -258,7 +263,7 @@ assertEqual(#castBar1.textures, 2, "cast layers prepared at acquisition")
 assertEqual(castBar1.textures[1].shown, false, "prepared cast layer stays hidden")
 assertEqual(castBar1.textures[2].shown, false, "second prepared layer stays hidden")
 
-CastingBarMixin.GetEffectiveType(castBar1, false, SECRET_NOT_INTERRUPTIBLE, false, false)
+NamePlateCastingBarMixin.GetEffectiveType(castBar1, false, SECRET_NOT_INTERRUPTIBLE, false, false)
 NamePlateUnitFrameMixin.ApplyFrameOptions(unitFrame1)
 assertTrue(healthBar1.textures == nil, "frame options do not activate before OnUnitSet")
 NamePlateUnitFrameMixin.OnUnitSet(unitFrame1)
@@ -288,10 +293,10 @@ assertEqual(firstCastTexture.alphaIfFalse, 255, "interruptible layer shown when 
 assertEqual(secondCastTexture.alphaIfTrue, 255, "blocked layer shown when blocked")
 assertEqual(secondCastTexture.alphaIfFalse, 0, "blocked layer hidden when allowed")
 
-CastingBarMixin.GetEffectiveType(castBar1, false, nil, false, false)
+NamePlateCastingBarMixin.GetEffectiveType(castBar1, false, nil, false, false)
 assertEqual(firstCastTexture.alphaSignal, true, "nil interruptibility fails closed")
 assertEqual(secondCastTexture.alphaSignal, true, "nil uses conservative border")
-CastingBarMixin.GetEffectiveType(castBar1, false, SECRET_NOT_INTERRUPTIBLE, false, false)
+NamePlateCastingBarMixin.GetEffectiveType(castBar1, false, SECRET_NOT_INTERRUPTIBLE, false, false)
 
 NamePlateUnitFrameMixin.ApplyFrameOptions(unitFrame1)
 assertEqual(firstCastTexture.alphaSignal, SECRET_NOT_INTERRUPTIBLE, "layout refresh preserves secret alpha")
@@ -314,7 +319,7 @@ assertTrue(restrictedHealthBar.textures == nil, "restricted frame creates no reg
 local plate2, unitFrame2, healthBar2, castBar2 = NewUnitFrame()
 combat = true
 NamePlateBaseMixin.AcquireUnitFrame(plate2)
-CastingBarMixin.GetEffectiveType(castBar2, false, SECRET_NOT_INTERRUPTIBLE, false, false)
+NamePlateCastingBarMixin.GetEffectiveType(castBar2, false, SECRET_NOT_INTERRUPTIBLE, false, false)
 NamePlateUnitFrameMixin.OnUnitSet(unitFrame2)
 assertTrue(healthBar2.textures == nil, "combat acquisition defers plate creation")
 assertTrue(castBar2.textures == nil, "combat acquisition defers cast creation")
@@ -331,7 +336,7 @@ NamePlateUnitFrameMixin.OnUnitSet(unitFrame3)
 combat = false
 eventFrame:Trigger("PLAYER_REGEN_ENABLED")
 assertEqual(#healthBar3.textures, 1, "deferred frame applies after combat")
-assertEqual(#castBar3.textures, 2, "deferred cast applies after combat")
+assertEqual(#castBar3.textures, 2, "deferred cast frame applies after combat")
 assertEqual(castBar3.textures[1].alphaSignal, true, "missed combat signal fails closed")
 assertEqual(castBar3.textures[2].alphaSignal, true, "second layer also fails closed")
 
@@ -341,7 +346,7 @@ assertEqual(castBar3.textures[1].shown, false, "cast layer hidden on recycle")
 assertEqual(castBar3.textures[2].shown, false, "second cast layer hidden on recycle")
 
 NamePlateBaseMixin.AcquireUnitFrame(plate3)
-CastingBarMixin.GetEffectiveType(castBar3, false, SECRET_NOT_INTERRUPTIBLE, false, false)
+NamePlateCastingBarMixin.GetEffectiveType(castBar3, false, SECRET_NOT_INTERRUPTIBLE, false, false)
 NamePlateUnitFrameMixin.OnUnitSet(unitFrame3)
 assertEqual(#healthBar3.textures, 1, "recycled frame reuses plate texture")
 assertEqual(#castBar3.textures, 2, "recycled frame reuses cast textures")
