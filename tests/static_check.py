@@ -33,13 +33,17 @@ assert "ResolveHookOwner" in cast
 assert "NamePlateCastingBarMixin.GetEffectiveType" in cast
 assert 'hooksecurefunc(hookOwner, "GetEffectiveType"' in cast
 assert 'hooksecurefunc(CastingBarMixin, "GetEffectiveType"' not in cast
+assert "return CastingBarMixin" not in cast
+assert "local function IsRuntimeSupported" in cast
+assert "not IsRuntimeSupported() or not IsUsableRegion(unitFrame)" in cast
+assert "HooksInstalled or not IsRuntimeSupported()" in cast
 assert "notInterruptible and" not in cast
 assert "not notInterruptible" not in cast
 assert "isInterruptible and" not in cast
 assert "not isInterruptible" not in cast
 
 assert "## Interface: 120105" in toc
-assert "## Version: 0.3.7" in toc
+assert "## Version: 0.3.8" in toc
 assert "## X-Source-Build: 12.1.5.70783" in toc
 assert "297d7aaaa736f346b3e036f38ee088eaf7f8c07f" in toc
 assert "local EXPECTED_INTERFACE = 120105" in core
@@ -57,7 +61,10 @@ assert 'NamePlateBaseMixin, "AcquireUnitFrame"' in core
 assert 'NamePlateUnitFrameMixin, "OnUnitSet"' in core
 assert 'NamePlateUnitFrameMixin, "OnUnitCleared"' in core
 assert "castModule.Prepare(unitFrame)" in core
+assert "local function InstallCastHooks" in core
+assert "castModule.InstallHooks()" in core
 assert "plate.offsetX" in core and "plate.offsetY" in core
+assert "IsReadableTable(plates)" in core
 assert "for _, namePlate in pairs(plates)" in core
 assert ":SetAlpha(" not in cast
 
@@ -79,10 +86,14 @@ assert "C_CVar.SetCVar" not in all_lua
 assert "SetCVar(" not in all_lua
 assert "nameplateSize" not in all_lua
 
-# Native font presentation is snapshotted and restored, including deferred
-# release during combat and stale-generation cancellation on reassignment.
+# Native font presentation is snapshotted and restored, including the actual
+# FontObject link, deferred release, and foreign-owner coexistence.
 assert "local FontStateByString" in core
 assert "local PendingFontRestoreByFrame" in core
+assert "local function ReadFontObject" in core
+assert "fontString:GetFontObject()" in core
+assert "fontString:SetFontObject(original.fontObject)" in core
+assert "left.fontObject == right.fontObject" in core
 assert "local function ReadFontPresentation" in core
 assert "local function RestoreFont" in core
 assert "local function RestoreFrameFonts" in core
@@ -90,6 +101,8 @@ assert "PendingFontRestoreByFrame[unitFrame] = state.generation" in core
 assert "state and not state.active and state.generation == generation" in core
 assert "PendingFontRestoreByFrame[unitFrame] = nil" in core
 assert "not SameFontPresentation(current, state.applied)" in core
+assert "current.shadowX ~= nil" in core
+assert "current.shadowR ~= nil" in core
 assert "relinquish" in core.lower()
 assert core.index("if InCombatLockdown() then", core.index("local function RefreshVisible")) < core.index("if not RuntimeSupported or not DB.enabled", core.index("local function RefreshVisible"))
 

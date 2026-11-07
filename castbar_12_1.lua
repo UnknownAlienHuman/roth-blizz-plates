@@ -43,6 +43,18 @@ local function IsUsableRegion(region)
   return true
 end
 
+local function IsRuntimeSupported()
+  local core = _G.RothBlizzPlates
+  if core == nil then
+    -- Standalone regression harnesses load this module without core.lua.
+    return true
+  end
+  if type(core.IsRuntimeSupported) ~= "function" then
+    return false
+  end
+  return core.IsRuntimeSupported() == true
+end
+
 local function NormalizeLayoutScale(value)
   if not IsAccessible(value) or type(value) ~= "number"
     or value ~= value or value < 0.25 or value > 4 then
@@ -193,7 +205,7 @@ local function UpdateFromNotInterruptible(castBar, notInterruptible)
 end
 
 local function Prepare(unitFrame)
-  if not IsUsableRegion(unitFrame) or InCombatLockdown() then
+  if not IsRuntimeSupported() or not IsUsableRegion(unitFrame) or InCombatLockdown() then
     return false
   end
 
@@ -227,7 +239,7 @@ local function Prepare(unitFrame)
 end
 
 local function Apply(unitFrame, scaleX, scaleY)
-  if not IsUsableRegion(unitFrame) then
+  if not IsRuntimeSupported() or not IsUsableRegion(unitFrame) then
     return false
   end
 
@@ -327,20 +339,11 @@ local function ResolveHookOwner()
     and type(NamePlateCastingBarMixin.GetEffectiveType) == "function" then
     return NamePlateCastingBarMixin
   end
-
-  -- Before Blizzard_NamePlates creates NamePlateCastingBarMixin, hook the
-  -- source method once. CreateFromMixins will copy this wrapped function into
-  -- the exact nameplate owner. After creation, the exact owner is preferred.
-  if type(CastingBarMixin) == "table"
-    and type(CastingBarMixin.GetEffectiveType) == "function" then
-    return CastingBarMixin
-  end
-
   return nil
 end
 
 local function InstallHooks()
-  if HooksInstalled or type(hooksecurefunc) ~= "function" then
+  if HooksInstalled or not IsRuntimeSupported() or type(hooksecurefunc) ~= "function" then
     return false
   end
 

@@ -329,23 +329,45 @@ local function HideOwnedRegions(state)
   end
 end
 
+local function ReadFontObject(fontString)
+  if type(fontString.GetFontObject) ~= "function" then
+    return nil
+  end
+
+  local fontObject = fontString:GetFontObject()
+  if fontObject == nil or not IsAccessible(fontObject) then
+    return nil
+  end
+  return fontObject
+end
+
 local function ReadFontPresentation(fontString)
   if not IsUsableRegion(fontString) or type(fontString.GetFont) ~= "function" then
     return nil
   end
 
   local fontFile, height, flags = fontString:GetFont()
-  if not IsAccessible(fontFile) or type(fontFile) ~= "string"
-    or not IsAccessible(height) or type(height) ~= "number"
+  if not IsAccessible(fontFile) then
+    return nil
+  end
+  local fontFileType = type(fontFile)
+  if fontFile ~= nil and fontFileType ~= "string" and fontFileType ~= "number" then
+    return nil
+  end
+  if not IsAccessible(height) or type(height) ~= "number"
     or not IsAccessible(flags) or type(flags) ~= "string" then
     return nil
   end
 
   local presentation = {
     fontFile = fontFile,
+    fontObject = ReadFontObject(fontString),
     height = height,
     flags = flags,
   }
+  if presentation.fontFile == nil and presentation.fontObject == nil then
+    return nil
+  end
 
   if type(fontString.GetShadowOffset) == "function" then
     local shadowX, shadowY = fontString:GetShadowOffset()
@@ -384,7 +406,8 @@ local function SameFontPresentation(left, right)
     return false
   end
 
-  return left.fontFile == right.fontFile
+  return left.fontObject == right.fontObject
+    and left.fontFile == right.fontFile
     and left.flags == right.flags
     and math.abs(left.height - right.height) <= 0.001
     and SameOptionalNumber(left.shadowX, right.shadowX)
@@ -405,7 +428,10 @@ local function RestoreFont(fontString)
   end
 
   local current = ReadFontPresentation(fontString)
-  if state.applied and current and not SameFontPresentation(current, state.applied) then
+  if not current then
+    return false
+  end
+  if state.applied and not SameFontPresentation(current, state.applied) then
     -- Another owner refreshed this FontString after our last apply. Relinquish
     -- ownership instead of overwriting the newer ordinary presentation.
     FontStateByString[fontString] = nil
@@ -413,7 +439,20 @@ local function RestoreFont(fontString)
   end
 
   local original = state.original
-  fontString:SetFont(original.fontFile, original.height, original.flags)
+  local restored = false
+  if original.fontObject ~= nil
+    and IsAccessible(original.fontObject)
+    and type(fontString.SetFontObject) == "function" then
+    fontString:SetFontObject(original.fontObject)
+    restored = true
+  elseif original.fontFile ~= nil and type(fontString.SetFont) == "function" then
+    fontString:SetFont(original.fontFile, original.height, original.flags)
+    restored = true
+  end
+
+  if not restored then
+    return false
+  end
 
   if original.shadowX ~= nil and type(fontString.SetShadowOffset) == "function" then
     fontString:SetShadowOffset(original.shadowX, original.shadowY)
@@ -458,21 +497,28 @@ local function ApplyFont(fontString, scaleY)
   scaleY = NormalizeLayoutScale(scaleY) or 1
   fontString:SetFont(fontPath, DB.font.size * scaleY, DB.font.outline)
 
-  if type(fontString.SetShadowOffset) == "function" then
+  if current.shadowX ~= nil and type(fontString.SetShadowOffset) == "function" then
     if DB.font.shadow then
       fontString:SetShadowOffset(1, -1)
-      if type(fontString.SetShadowColor) == "function" then
-        fontString:SetShadowColor(0, 0, 0, 1)
-      end
     else
       fontString:SetShadowOffset(0, 0)
     end
   end
+  if DB.font.shadow and current.shadowR ~= nil and type(fontString.SetShadowColor) == "function" then
+    fontString:SetShadowColor(0, 0, 0, 1)
+  end
 
   state.applied = ReadFontPresentation(fontString) or {
     fontFile = fontPath,
+    fontObject = nil,
     height = DB.font.size * scaleY,
     flags = DB.font.outline,
+    shadowX = current.shadowX ~= nil and (DB.font.shadow and 1 or 0) or nil,
+    shadowY = current.shadowY ~= nil and (DB.font.shadow and -1 or 0) or nil,
+    shadowR = DB.font.shadow and current.shadowR ~= nil and 0 or current.shadowR,
+    shadowG = DB.font.shadow and current.shadowG ~= nil and 0 or current.shadowG,
+    shadowB = DB.font.shadow and current.shadowB ~= nil and 0 or current.shadowB,
+    shadowA = DB.font.shadow and current.shadowA ~= nil and 1 or current.shadowA,
   }
 end
 
@@ -782,7 +828,7 @@ local function RefreshVisible()
   end
 
   local plates = C_NamePlate.GetNamePlates()
-  if not IsAccessible(plates) or type(plates) ~= "table" then
+  if not IsReadableTable(plates) then
     return
   end
 
@@ -940,6 +986,13 @@ local function InstallNamePlateHooks()
   return true
 end
 
+local function InstallCastHooks()
+  local castModule = _G.RothBlizzPlates_CastBar
+  if castModule and type(castModule.InstallHooks) == "function" then
+    castModule.InstallHooks()
+  end
+end
+
 local EventFrame = CreateFrame("Frame")
 EventFrame:RegisterEvent("NAME_PLATE_UNIT_ADDED")
 EventFrame:RegisterEvent("NAME_PLATE_UNIT_REMOVED")
@@ -967,6 +1020,7 @@ EventFrame:SetScript("OnEvent", function(_, event, ...)
     end
   elseif event == "PLAYER_ENTERING_WORLD" then
     InstallNamePlateHooks()
+    InstallCastHooks()
     ScheduleRefresh()
   elseif event == "PLAYER_REGEN_ENABLED" then
     FlushPending()

@@ -2,7 +2,7 @@
 ## Title: Roth Blizzard Plates
 ## Notes: Roth-style presentation for Blizzard-owned nameplates and cast bars on Retail 12.1.5.
 ## Author: Iurii
-## Version: 0.3.7
+## Version: 0.3.8
 ## SavedVariables: RothBlizzPlatesDB
 ## X-Source-Build: 12.1.5.70783
 ## X-Source-Commit: 297d7aaaa736f346b3e036f38ee088eaf7f8c07f
