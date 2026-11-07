@@ -7,9 +7,9 @@ Roth-style presentation for Blizzard-owned nameplates and cast bars on World of 
 ## Compatibility
 
 - Retail interface: `120105`
-- Addon version: `0.3.6`
-- Selected Blizzard source baseline: `12.1.5.70688`
-- Source commit: `d07eb00237d8891f153215db98a5df880a26cfe5`
+- Addon version: `0.3.7`
+- Selected Blizzard source baseline: `12.1.5.70783`
+- Source commit: `297d7aaaa736f346b3e036f38ee088eaf7f8c07f`
 - External libraries: none
 
 ## Runtime model
@@ -22,6 +22,13 @@ Roth-style presentation for Blizzard-owned nameplates and cast bars on World of 
 - The cast hook prefers the exact copied `NamePlateCastingBarMixin`; before that mixin exists, it hooks the source method once so `CreateFromMixins` copies the wrapped function.
 - Potentially secret interruptibility flows directly into complementary `SetAlphaFromBoolean` sinks without comparison, negation, logging, or persistence.
 - Combat-deferred work is weak-keyed and generation-checked, so recycled frames cannot receive stale work.
+
+## Changes in 0.3.7
+
+- Re-audit the addon against Retail build `12.1.5.70783` and source commit `297d7aaaa736f346b3e036f38ee088eaf7f8c07f`.
+- Confirm that the `70688 -> 70783` delta does not change Blizzard nameplate, castbar, Settings, region, or font implementation used by the addon.
+- Record the only relevant shared API delta: `UNIT_COMBAT.amount` is now explicitly secret; RothBlizzPlates does not consume `UNIT_COMBAT` or that payload.
+- Keep runtime code unchanged because the selected ownership and security contracts remain valid.
 
 ## Changes in 0.3.6
 
@@ -52,7 +59,7 @@ texlua tests/test_native_scale.lua .
 python3 tests/static_check.py
 ```
 
-The 0.3.6 targeted checks cover native size scaling and confirm that all geometry writes remain confined to addon-owned textures. Live Retail validation is still required for real cast/channel transitions, visual alignment across nameplate styles and sizes, UI scale, locale rendering, coexistence, and taint/forbidden-action logs.
+The 0.3.7 source audit found no nameplate/castbar contract delta requiring runtime changes. Live Retail validation is still required for real cast/channel transitions, visual alignment across nameplate styles and sizes, UI scale, locale rendering, coexistence, and taint/forbidden-action logs.
 
 ## Installation
 
