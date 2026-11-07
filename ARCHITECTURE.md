@@ -18,7 +18,7 @@ Target: Retail `12.1.5`, interface `120105`.
 
 Selected source: build `12.1.5.70783`, commit `297d7aaaa736f346b3e036f38ee088eaf7f8c07f`.
 
-The reviewed `12.1.5.70688 -> 12.1.5.70783` delta does not modify the selected nameplate, castbar, Settings, region, font, or curve implementation. Its only shared Unit API change relevant to the addon's security review marks `UNIT_COMBAT.amount` as secret. RothBlizzPlates does not register `UNIT_COMBAT` or consume that payload, so no runtime adapter changed.
+The reviewed `12.1.5.70688 -> 12.1.5.70783` delta does not modify the selected nameplate, castbar, Settings, region, font, or curve implementation. Its only shared Unit API change relevant to this addon marks `UNIT_COMBAT.amount` as secret. RothBlizzPlates does not register that event or consume its payload.
 
 Canonical source paths:
 
@@ -30,8 +30,9 @@ Canonical source paths:
 - `unitFrame.CastBarsContainer.castBar`
 - `NamePlateCastingBarMixin:GetEffectiveType(..., notInterruptible, ...)`
 - `CastingBarMixin:IsInterruptable()`
+- `SimpleFontString:GetFontObject()` / `SetFontObject()`
 
-`NamePlateCastingBarMixin` is created with `CreateFromMixins(CastingBarMixin, NamePlateComponentMixin)`, so its methods are copied rather than dynamically inherited.
+`NamePlateCastingBarMixin` is created with `CreateFromMixins(CastingBarMixin, NamePlateComponentMixin)`, so it is treated as the exact hook owner after creation. The addon does not assume that a secure hook attached to the source table propagates through a copied mixin.
 
 ## Assignment lifecycle
 
@@ -81,19 +82,30 @@ The addon never reads native region geometry to infer scale and never writes the
 
 ## Cast hook and current-state recovery
 
-One `GetEffectiveType` hook is installed, selected by load order:
+The module installs one hook only on the exact `NamePlateCastingBarMixin:GetEffectiveType` owner:
 
-- if `NamePlateCastingBarMixin` already exists, hook its copied method directly;
-- before Blizzard creates that mixin, hook the source method once so `CreateFromMixins` copies the wrapped function;
-- never hook both owners in the same session.
+- if the mixin already exists, install immediately;
+- otherwise wait for `Blizzard_NamePlates` through `EventUtil.ContinueOnAddOnLoaded`;
+- retry once at `PLAYER_ENTERING_WORLD` as a bounded fallback;
+- never hook generic `CastingBarMixin`.
 
-A late attach or combat-deferred apply can miss the hook signal. In that case, `castBar:IsInterruptable()` supplies Blizzard's current ordinary-or-secret boolean. The addon routes it directly into two complementary `SetAlphaFromBoolean` calls. The result is never inspected or inverted in Lua. If the method is unavailable, the presentation fails closed to non-interruptible art.
+This avoids relying on undocumented `hooksecurefunc` propagation through `CreateFromMixins`. A late attach or combat-deferred apply can miss an earlier signal; `castBar:IsInterruptable()` then supplies Blizzard's current ordinary-or-secret boolean. The addon routes it directly into two complementary `SetAlphaFromBoolean` calls. The result is never inspected or inverted in Lua. If the method is unavailable, presentation fails closed to non-interruptible art.
+
+Core runtime compatibility is authoritative. Unsupported interface or SavedVariables contracts prevent cast hook installation, preparation, and apply even if the internal cast module is called directly.
 
 ## Font ownership and restoration
 
-Before the first font mutation, the addon snapshots font file, height, flags, shadow offset, and shadow color. A later Blizzard refresh observed through `ApplyFrameOptions` replaces the baseline before the Roth style is reapplied.
+Before the first font mutation, the addon snapshots:
 
-The Roth font's configured medium-size height is multiplied by Blizzard's current vertical nameplate scale. Disable/release restores the current native baseline outside combat. Combat release queues one generation-tagged restore. Reassignment invalidates stale restore work. If the current presentation no longer matches the last Roth-applied presentation, cleanup treats it as a newer foreign-owner update and relinquishes ownership without overwriting it.
+- effective font asset, height, and flags;
+- the actual Blizzard `FontObject`, when present;
+- readable shadow offset and color.
+
+A later Blizzard refresh observed through `ApplyFrameOptions` replaces that baseline before Roth styling is reapplied. Cleanup prefers `SetFontObject(original)` so the native inheritance relationship and future global font updates are restored, not merely a copied file/height/flags snapshot. A direct-font baseline falls back to `SetFont`.
+
+The addon changes shadow offset/color only when the matching native value was readable and therefore reversible. Unreadable presentation fails closed without mutation. The Roth font's configured medium-size height is multiplied by Blizzard's current vertical nameplate scale.
+
+Disable/release restores the current native baseline outside combat. Combat release queues one generation-tagged restore. Reassignment invalidates stale restore work. If the current presentation no longer matches the last Roth-applied presentation, cleanup treats it as a newer foreign-owner update and relinquishes ownership without overwriting it.
 
 ## Security boundary
 
@@ -101,8 +113,8 @@ The Roth font's configured medium-size height is multiplied by Blizzard's curren
 - Secret interruptibility is never compared, negated, keyed, formatted, logged, stored, or deferred.
 - `SetAlphaFromBoolean` is the only secret conditional presentation sink.
 - Accessible unknown `notInterruptible`, including documented `nil`, fails closed.
-- Scale fields are consumed only after table/value access gates and strict numeric bounds.
-- `UNIT_COMBAT` payloads are outside the addon contract; the current source explicitly marks its `amount` field secret.
+- Scale fields and bounded plate tables are consumed only after table/value access gates.
+- `UNIT_COMBAT` payloads are outside the addon contract; current source marks its `amount` field secret.
 - No child-tree scans, color inference, raw unit-data reads, broad guessed hooks, or retry loops exist.
 
 ## Geometry boundary
@@ -115,4 +127,4 @@ A missing schema is treated as legacy schema 0. Only finite non-negative whole n
 
 ## Evidence ceiling
 
-Offline tests prove the mocked lifecycle, persistence, hook-owner, current-state, restoration, and native-size integration policies. The `70783` source review proves only that the selected source contracts did not change; it does not prove visual alignment, current-client taint behavior, restricted encounter behavior, or live performance.
+Offline tests prove the mocked lifecycle, persistence, exact hook owner, current-state recovery, runtime gate, FontObject restoration, foreign-owner coexistence, and native-size integration policies. The `70783` source review proves only that selected source contracts did not change; it does not prove visual alignment, current-client taint behavior, restricted encounter behavior, or live performance.
