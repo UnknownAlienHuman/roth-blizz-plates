@@ -13,6 +13,7 @@ local function assertTrue(value, message)
 end
 
 local SECRET = {}
+local continueCallback
 
 function canaccessvalue(value)
   return value ~= SECRET
@@ -22,7 +23,12 @@ function InCombatLockdown()
   return false
 end
 
-EventUtil = nil
+EventUtil = {
+  ContinueOnAddOnLoaded = function(addonName, callback)
+    assertEqual(addonName, "Blizzard_NamePlates", "continuation addon")
+    continueCallback = callback
+  end,
+}
 
 local function NewRegion()
   local region = {
@@ -77,12 +83,19 @@ NamePlateCastingBarMixin = nil
 
 local baseMethodBeforeLoad = CastingBarMixin.GetEffectiveType
 assert(loadfile(ROOT .. "/castbar_12_1.lua"))("RothBlizzPlates")
-assertTrue(CastingBarMixin.GetEffectiveType ~= baseMethodBeforeLoad, "pre-load source method must be hooked")
+assertEqual(CastingBarMixin.GetEffectiveType, baseMethodBeforeLoad, "generic source owner stays unhooked")
+assertTrue(type(continueCallback) == "function", "exact-owner continuation registered")
 
--- Blizzard_NamePlates later copies the already wrapped source function.
+-- Blizzard_NamePlates creates a distinct copied owner. The continuation hooks
+-- that exact table; correctness does not depend on hooksecurefunc propagation
+-- through CreateFromMixins.
 NamePlateCastingBarMixin = {
   GetEffectiveType = CastingBarMixin.GetEffectiveType,
 }
+local exactMethodBeforeHook = NamePlateCastingBarMixin.GetEffectiveType
+continueCallback()
+assertTrue(NamePlateCastingBarMixin.GetEffectiveType ~= exactMethodBeforeHook, "exact copied owner hooked after load")
+assertEqual(CastingBarMixin.GetEffectiveType, baseMethodBeforeLoad, "base owner still isolated")
 
 local castBar = NewRegion()
 setmetatable(castBar, { __index = NamePlateCastingBarMixin })
@@ -105,7 +118,7 @@ RothBlizzPlatesDB = {
 
 assertEqual(RothBlizzPlates_CastBar.Prepare(unitFrame), true, "castbar preparation")
 NamePlateCastingBarMixin.GetEffectiveType(castBar, false, SECRET, false, false)
-assertEqual(castBar.textures[1].alphaSignal, SECRET, "copied wrapped source forwards secret signal")
-assertEqual(castBar.textures[2].alphaSignal, SECRET, "copied blocked layer receives secret signal")
+assertEqual(castBar.textures[1].alphaSignal, SECRET, "exact post-load hook forwards secret signal")
+assertEqual(castBar.textures[2].alphaSignal, SECRET, "blocked layer receives secret signal")
 
 print("test_castbar_hook_preload.lua: ok")
